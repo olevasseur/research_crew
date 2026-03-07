@@ -1,7 +1,6 @@
 from pathlib import Path
 
-from crewai import Agent, Task, Crew, Process
-from langchain_ollama import OllamaLLM
+from crewai import Agent, Task, Crew, Process, LLM
 
 from tools import fetch_webpage
 
@@ -21,8 +20,9 @@ def read_seed_urls():
 
 def build_crew():
 
-    llm = OllamaLLM(
-        model="llama3"
+    llm = LLM(
+        model="ollama/llama3.1",
+        base_url="http://localhost:11434"
     )
 
     # ---- load prompts ----
