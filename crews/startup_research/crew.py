@@ -78,21 +78,41 @@ def build_crew():
 
     find_sources = Task(
         description=f"{find_sources_desc}\n\nSeed URLs:\n{seed_urls}",
+        expected_output=(
+            "A structured research summary of the seed URLs, including source URL, "
+            "main topic, notable complaints, inefficiencies, compliance burdens, "
+            "manual workflows, and repeated pain points."
+        ),
         agent=researcher,
     )
 
     extract_problems = Task(
         description=extract_problems_desc,
+        expected_output=(
+            "A deduplicated list of real problems extracted from the research, with "
+            "for each problem: title, affected user, why it hurts, current workaround, "
+            "urgency, frequency, and evidence from the sources."
+        ),
         agent=problem_analyst,
     )
 
     generate_ideas = Task(
         description=generate_ideas_desc,
+        expected_output=(
+            "A list of startup ideas mapped to the extracted problems. For each idea, "
+            "include problem solved, target user, product concept, business model, "
+            "why a user would pay, and why it fits a solo founder."
+        ),
         agent=founder,
     )
 
     rank_ideas = Task(
         description=rank_ideas_desc,
+        expected_output=(
+            "A ranked list of the best startup ideas with scoring and justification. "
+            "Include rank, idea name, strengths, weaknesses, leverage, recurring revenue "
+            "potential, founder fit, and a final recommendation."
+        ),
         agent=evaluator,
     )
 
