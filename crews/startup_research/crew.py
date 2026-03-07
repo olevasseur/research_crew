@@ -21,7 +21,10 @@ def read_seed_urls():
 
 def build_crew():
 
-    llm = Ollama(model="llama3")
+    llm = Ollama(
+        model="llama3",
+        base_url="http://localhost:11434"
+    )
 
     # ---- load prompts ----
 
