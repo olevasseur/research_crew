@@ -1,0 +1,6 @@
+https://news.ycombinator.com/
+https://blog.cloudflare.com/
+https://aws.amazon.com/blogs/security/
+https://github.blog/engineering/
+https://www.reddit.com/r/devops.json
+
