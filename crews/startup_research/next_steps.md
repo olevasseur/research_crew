@@ -1,0 +1,1 @@
+* parse reddit posts for the last 2 days and extract pain points from there

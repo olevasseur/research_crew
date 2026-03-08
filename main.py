@@ -1,5 +1,6 @@
 import sys
 import importlib
+from pathlib import Path
 
 
 def run_crew(crew_name):
@@ -8,8 +9,10 @@ def run_crew(crew_name):
     result = crew.kickoff()
     print("\nFINAL RESULT\n")
     print(result)
-    with open("results.md", "w") as f:
-        f.write(str(result))
+
+    results_dir = Path("crews") / crew_name / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    (results_dir / "final_ranked_ideas.md").write_text(str(result))
 
 
 if __name__ == "__main__":

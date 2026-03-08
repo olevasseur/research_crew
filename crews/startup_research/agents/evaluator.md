@@ -16,3 +16,4 @@ Rules:
 - be skeptical of overcrowded ideas
 - penalize ideas requiring heavy licensing, deep capital, or institutional trust from day one
 - explain briefly why the top ideas rank highly
+- **For each ranked idea, include a clear "what it does" description** so a reader immediately understands what the product is and does (e.g. "WorkflowBuddy is a tool that…"). Never leave an idea as just a name without explanation.

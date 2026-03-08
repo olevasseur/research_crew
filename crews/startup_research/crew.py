@@ -2,10 +2,12 @@ from pathlib import Path
 
 from crewai import Agent, Task, Crew, Process, LLM
 
-from tools import fetch_webpage
+from tools import fetch_webpage, extract_links
 
 
 BASE_DIR = Path(__file__).parent
+# Relative to project root so paths are consistent (run from repo root)
+RESULTS_DIR = Path("crews/startup_research/results")
 
 
 def load_prompt(path):
@@ -39,13 +41,15 @@ def build_crew():
 
     seed_urls = read_seed_urls()
 
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
     # ---- agents ----
 
     researcher = Agent(
         role="Startup Pain Point Researcher",
         goal="Find real complaints and inefficiencies",
         backstory=researcher_prompt,
-        tools=[fetch_webpage],
+        tools=[fetch_webpage, extract_links],
         verbose=True,
         llm=llm,
     )
@@ -94,6 +98,7 @@ def build_crew():
             "urgency, frequency, and evidence from the sources."
         ),
         agent=problem_analyst,
+        output_file=str(RESULTS_DIR / "raw_evidence.md"),
     )
 
     generate_ideas = Task(
@@ -110,10 +115,11 @@ def build_crew():
         description=rank_ideas_desc,
         expected_output=(
             "A ranked list of the best startup ideas with scoring and justification. "
-            "Include rank, idea name, strengths, weaknesses, leverage, recurring revenue "
-            "potential, founder fit, and a final recommendation."
+            "For each idea include: rank, idea name, a clear description of what the product is and what it does (so the reader understands without prior context), "
+            "strengths, weaknesses, leverage, recurring revenue potential, founder fit, and a final recommendation."
         ),
         agent=evaluator,
+        output_file=str(RESULTS_DIR / "final_ranked_ideas.md"),
     )
 
     # ---- crew ----
