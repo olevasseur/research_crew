@@ -1,7 +1,56 @@
+from pathlib import Path
+
+import pdfplumber
 import requests
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
 from crewai.tools import tool
+
+
+@tool
+def get_book_info(file_path: str) -> dict:
+    """Get basic info about a book file (page count for PDFs). Call this first so you know how many pages to read. total_pages is the number of pages; you must read from page 0 to total_pages-1 by calling read_book in chunks."""
+    path = Path(file_path)
+    if not path.exists():
+        return {"file": file_path, "error": f"File not found: {file_path}"}
+    try:
+        if path.suffix.lower() == ".pdf":
+            with pdfplumber.open(path) as pdf:
+                total = len(pdf.pages)
+            return {"file": file_path, "total_pages": total, "format": "pdf"}
+        else:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            return {"file": file_path, "total_chars": len(text), "format": "text"}
+    except Exception as e:
+        return {"file": file_path, "error": str(e)}
+
+
+@tool
+def read_book(file_path: str, start_page: int = 0, max_pages: int = 50) -> dict:
+    """Read a book from a local file and return its text. Supports .txt, .md, and .pdf files. For PDFs, extracts text page-by-page. Use start_page and max_pages to read in chunks if the book is large (call multiple times with increasing start_page to read the whole book)."""
+    path = Path(file_path)
+    if not path.exists():
+        return {"file": file_path, "text": "", "error": f"File not found: {file_path}"}
+    try:
+        if path.suffix.lower() == ".pdf":
+            pages = []
+            with pdfplumber.open(path) as pdf:
+                total = len(pdf.pages)
+                end = min(start_page + max_pages, total)
+                for i in range(start_page, end):
+                    page_text = pdf.pages[i].extract_text() or ""
+                    pages.append({"page": i + 1, "text": page_text})
+            return {
+                "file": file_path,
+                "total_pages": total,
+                "pages_returned": f"{start_page + 1}-{end}",
+                "pages": pages,
+            }
+        else:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            return {"file": file_path, "text": text[:200_000]}
+    except Exception as e:
+        return {"file": file_path, "text": "", "error": str(e)}
 
 
 @tool

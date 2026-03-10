@@ -1,0 +1,1 @@
+{"title": "Digital Minimalism", "author": "Cal Newport", "description": "A philosophy of technology use that focuses on a small number of carefully selected and optimized activities that strongly support things you value."}

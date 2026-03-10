@@ -1,0 +1,33 @@
+# RAG Configuration for Book Analysis Pipeline
+# Adjust these settings based on your hardware and model choices.
+
+embedding:
+  model: "nomic-embed-text"           # Ollama embedding model (pull with: ollama pull nomic-embed-text)
+  base_url: "http://localhost:11434"
+  # TODO v2: support OpenAI-compatible embedding APIs
+
+generation:
+  model: "llama3.1"                   # Ollama generation model (without ollama/ prefix)
+  base_url: "http://localhost:11434"
+  # TODO v2: model routing — different models for different tasks (e.g. fast for chunking, strong for synthesis)
+
+chunking:
+  target_size: 1500                   # Target chunk size in characters
+  overlap: 200                        # Overlap between consecutive chunks in characters
+  min_chunk_size: 100                 # Discard chunks smaller than this
+  # TODO v2: token-based chunking instead of character-based
+
+retrieval:
+  top_k: 10                          # Chunks to retrieve per query
+  similarity_threshold: 0.0          # Minimum similarity (0.0 = no filter)
+  max_context_chunks: 20             # Max chunks to include in a single LLM prompt
+  # TODO v2: reranking step after initial retrieval
+
+vectorstore:
+  type: "chroma"                     # Vector store backend
+  persist_directory: "./data/vectorstore"
+  collection_name: "books"
+  # TODO v2: support Qdrant for better filtering and scalability
+
+storage:
+  results_directory: "./data/results"
