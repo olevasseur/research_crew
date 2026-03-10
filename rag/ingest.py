@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pdfplumber
 
-from .chunker import Chapter, Chunk, PageText, chunk_pages, detect_chapters
+from .chunker import Chapter, Chunk, PageText, Section, chunk_pages, detect_structure
 from .config import RAGConfig
 from .embeddings import OllamaEmbedder
 from .store import VectorStore
@@ -72,11 +72,13 @@ def ingest_book(
     if not book_id:
         book_id = slugify(title)
 
-    # 4. Detect chapters
-    chapters: list[Chapter] = detect_chapters(pages)
+    # 4. Detect structure
+    chapters, _ = detect_structure(pages)
+    print(f"Detected {len(chapters)} sections:")
     for ch in chapters:
-        print(f"  [{ch.kind.value:12s}]  p.{ch.start_page:>3d}-{ch.end_page:<3d}  "
-              f"conf={ch.confidence:.2f}  {ch.name}")
+        span = ch.end_page - ch.start_page + 1
+        print(f"  p.{ch.start_page:>3d}-{ch.end_page:<3d}  ({span:>3d} pp)  "
+              f"[{ch.kind.value:12s}]  {ch.name}")
 
     # 5. Chunk
     chunks: list[Chunk] = chunk_pages(

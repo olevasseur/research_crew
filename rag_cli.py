@@ -12,6 +12,7 @@ Usage:
     python rag_cli.py inspect chunks <book_id> [--chapter CH]
     python rag_cli.py inspect summary <book_id>
     python rag_cli.py inspect search "<query>" [--book <book_id>]
+    python rag_cli.py inspect-structure <file>  [--debug]
 """
 
 from __future__ import annotations
@@ -71,6 +72,28 @@ def cmd_ask(args):
     book_ids = args.books.split(",") if args.books else None
     answer = ask_question(args.question, config, book_ids=book_ids)
     print("\n" + answer)
+
+
+def cmd_inspect_structure(args):
+    """Dry-run structure detection on a file without ingesting."""
+    from rag.ingest import load_file, clean_text
+    from rag.chunker import detect_structure
+    pages = load_file(args.file)
+    for p in pages:
+        p.text = clean_text(p.text)
+    sections, all_matches = detect_structure(pages, debug=args.debug)
+    print(f"\nDetected {len(sections)} section(s) from {len(pages)} pages:\n")
+    for s in sections:
+        page_span = s.end_page - s.start_page + 1
+        print(f"  p.{s.start_page:>3d}-{s.end_page:<3d}  ({page_span:>3d} pp)  "
+              f"[{s.kind.value:12s}]  conf={s.confidence:.2f}  {s.name}")
+        print(f"    reason: {s.detection_reason}")
+    if args.debug:
+        print(f"\nAll heading matches ({len(all_matches)}):")
+        for m in all_matches:
+            print(f"  p.{m.page:>3d}  conf={m.confidence:.2f}  "
+                  f"{m.heading_type:20s}  {m.label!r}")
+            print(f"    reason: {m.reason}")
 
 
 def cmd_inspect(args):
@@ -140,6 +163,12 @@ def main():
     p_ask.add_argument("question")
     p_ask.add_argument("--books", default=None, help="Comma-separated book IDs to scope the search")
     p_ask.set_defaults(func=cmd_ask)
+
+    # --- inspect-structure ---
+    p_struct = sub.add_parser("inspect-structure", help="Dry-run structure detection on a file")
+    p_struct.add_argument("file", help="Path to book file (PDF, txt, md)")
+    p_struct.add_argument("--debug", action="store_true", help="Show all candidates and rejections")
+    p_struct.set_defaults(func=cmd_inspect_structure)
 
     # --- inspect ---
     p_ins = sub.add_parser("inspect", help="Inspect data and results")

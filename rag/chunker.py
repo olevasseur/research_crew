@@ -1,19 +1,27 @@
-"""Text chunking with strict chapter detection and page tracking."""
+"""Book structure detection and text chunking.
+
+Structure detection is separate from chunking:
+  1. detect_structure()  — find section boundaries from page text
+  2. chunk_pages()       — split text into overlapping chunks within sections
+
+The detector uses a page-level state machine (front → toc → body → back)
+and explicit heading patterns with confidence scoring.
+"""
 
 from __future__ import annotations
 
 import re
 import sys
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 from .config import ChunkingConfig
 
 
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
 # Data types
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
 
 @dataclass
 class PageText:
@@ -29,13 +37,30 @@ class SectionKind(Enum):
 
 
 @dataclass
-class Chapter:
+class HeadingMatch:
+    """A detected heading candidate with provenance."""
+    page: int
+    raw_text: str
+    label: str          # normalised display name
+    heading_type: str   # e.g. "bare_number", "part", "structural", "back_matter"
+    confidence: float
+    reason: str         # human-readable explanation of why it matched
+    kind: SectionKind = SectionKind.BODY
+
+
+@dataclass
+class Section:
+    """A detected section of the book."""
     name: str
     start_page: int
     end_page: int
     kind: SectionKind = SectionKind.BODY
-    confidence: float = 1.0  # 0.0 – 1.0
+    confidence: float = 1.0
     detection_reason: str = ""
+
+
+# Keep backward compat — other modules import "Chapter"
+Chapter = Section
 
 
 @dataclass
@@ -53,16 +78,20 @@ class Chunk:
     page_range: str
 
 
-# ---------------------------------------------------------------------------
-# Heading patterns with confidence tiers
+# ═══════════════════════════════════════════════════════════════════════════
+# Heading patterns
 #
-# HIGH  (0.95) — Unambiguous chapter/part markers with numbers
-# GOOD  (0.85) — Known structural labels (Introduction, Conclusion, etc.)
-# BACK  (0.80) — Back-matter labels (Notes, Index, etc.)
-# ---------------------------------------------------------------------------
+# Each rule: (compiled regex, confidence, heading_type, SectionKind)
+# Patterns are tried in order; first match wins per line.
+# ═══════════════════════════════════════════════════════════════════════════
 
-_HEADING_RULES: list[tuple[re.Pattern, float, str]] = [
-    # --- HIGH confidence: numbered chapters ---
+_HEADING_PATTERNS: list[tuple[re.Pattern, float, str, SectionKind]] = [
+    # --- Bare number on its own line (very common in modern books) ---
+    # Matches "1", "2", … "99" when the line contains ONLY the number.
+    (re.compile(r"^\s*(\d{1,2})\s*$"),
+     0.90, "bare_number", SectionKind.BODY),
+
+    # --- "CHAPTER N" or "Chapter N" with optional subtitle ---
     (re.compile(
         r"^\s*(?:CHAPTER|Chapter)\s+"
         r"(\d{1,3}|[IVXLCDM]{1,10}|"
@@ -70,96 +99,147 @@ _HEADING_RULES: list[tuple[re.Pattern, float, str]] = [
         r"Eleven|Twelve|Thirteen|Fourteen|Fifteen|Sixteen|"
         r"Seventeen|Eighteen|Nineteen|Twenty)"
         r"(?:\s*[:.—–\-]\s*.+)?$",
-        re.IGNORECASE,
-    ), 0.95, "numbered chapter"),
+        re.IGNORECASE),
+     0.95, "chapter_keyword", SectionKind.BODY),
 
-    # --- HIGH confidence: numbered parts ---
+    # --- "N. Title" format (e.g. "1. A Lopsided Arms Race") ---
+    (re.compile(r"^\s*(\d{1,2})\.\s+[A-Z]"),
+     0.90, "numbered_dot_title", SectionKind.BODY),
+
+    # --- "PART N" or "Part N" with optional subtitle ---
     (re.compile(
         r"^\s*(?:PART|Part)\s+"
         r"(\d{1,3}|[IVXLCDM]{1,10}|"
         r"One|Two|Three|Four|Five|Six|Seven|Eight|Nine|Ten)"
         r"(?:\s*[:.—–\-]\s*.+)?$",
-        re.IGNORECASE,
-    ), 0.95, "numbered part"),
+        re.IGNORECASE),
+     0.95, "part", SectionKind.BODY),
 
-    # --- GOOD confidence: known structural sections ---
+    # --- Structural sections (Introduction, Conclusion, etc.) ---
+    # Must be the ENTIRE line (with optional short subtitle).
     (re.compile(
         r"^\s*(?:Introduction|Conclusion|Preface|Foreword|Epilogue|"
         r"Prologue|Afterword|Appendix)"
-        r"(?:\s*[:.—–\-]\s*.+)?$",
-        re.IGNORECASE,
-    ), 0.85, "structural section"),
+        r"(?:\s*[:.—–\-]\s*.{0,40})?$",
+        re.IGNORECASE),
+     0.85, "structural", SectionKind.BODY),
 
-    # --- BACK confidence: back-matter sections ---
+    # --- Back matter ---
     (re.compile(
         r"^\s*(?:Notes|Endnotes|Bibliography|References|"
         r"Acknowledgments|Acknowledgements|"
-        r"About\s+the\s+Author|Index|Glossary|"
+        r"About\s+the\s+Author|About\s+the\s+Authors|"
+        r"Index|Glossary|"
         r"Further\s+Reading|Recommended\s+Reading|"
         r"Selected\s+Bibliography)"
-        r"(?:\s*[:.—–\-]\s*.+)?$",
-        re.IGNORECASE,
-    ), 0.80, "back matter"),
+        r"(?:\s*[:.—–\-]\s*.{0,40})?$",
+        re.IGNORECASE),
+     0.85, "back_matter", SectionKind.BACK_MATTER),
 ]
 
-# Lines that look like headings but are really TOC entries or body text
-_TOC_INDICATORS = re.compile(
-    r"(?:"
-    r"\.{3,}"               # dot leaders (Introduction.........12)
-    r"|\d{1,4}\s*$"         # bare trailing page number
-    r"|(?:chapter|part)\s+\d.*chapter\s+\d"  # multiple chapters on one line
-    r")",
-    re.IGNORECASE,
-)
 
-# Reject lines that are clearly sentences (body text), not headings
-_SENTENCE_RE = re.compile(
-    r"[,;]"                  # commas/semicolons (headings almost never have these)
-    r"|"
-    r"\b(?:is|are|was|were|have|has|had|will|would|could|should|"
-    r"that|which|because|although|however|therefore|"
-    r"the\s+\w+\s+\w+\s+\w+)"  # 4+ word phrases starting with "the"
-    r"",
-    re.IGNORECASE,
-)
+# ═══════════════════════════════════════════════════════════════════════════
+# Rejection filters — lines that LOOK like headings but aren't
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _is_toc_line(line: str) -> bool:
+    """Dot leaders, trailing page numbers, multiple chapter refs on one line."""
+    if re.search(r"\.{3,}", line):
+        return True
+    if re.search(r"(?:chapter|part)\s+\d.*(?:chapter|part)\s+\d", line, re.IGNORECASE):
+        return True
+    return False
 
 
-# ---------------------------------------------------------------------------
-# Heading candidate
-# ---------------------------------------------------------------------------
-
-@dataclass
-class _Candidate:
-    page: int
-    text: str
-    confidence: float
-    reason: str
+def _is_sentence(line: str) -> bool:
+    """Lines with commas, semicolons, or clause-style words are body text."""
+    if re.search(r"[,;]", line):
+        return True
+    word_count = len(line.split())
+    if word_count > 8:
+        return True
+    return False
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+def _is_notes_reference(line: str) -> bool:
+    """Lines like 'CHAPTER 2: DIGITAL MINIMALISM' inside the Notes section."""
+    if re.match(r"^\s*CHAPTER\s+\d", line, re.IGNORECASE):
+        # Only reject if the line also contains a colon followed by text
+        # (notes section headers like "CHAPTER 2: DIGITAL MINIMALISM")
+        if ":" in line and len(line.split(":")) >= 2:
+            return True
+    return False
 
-def detect_chapters(
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Page-level state machine
+# ═══════════════════════════════════════════════════════════════════════════
+
+class _BookState(Enum):
+    FRONT = "front"
+    TOC = "toc"
+    BODY = "body"
+    BACK = "back"
+
+
+def _classify_state_transition(
+    heading: HeadingMatch,
+    current_state: _BookState,
+) -> _BookState:
+    """Determine the new state after encountering a heading."""
+    if heading.heading_type == "back_matter":
+        return _BookState.BACK
+    if heading.heading_type in ("bare_number", "chapter_keyword", "numbered_dot_title", "part"):
+        return _BookState.BODY
+    if heading.heading_type == "structural":
+        low = heading.label.lower()
+        if any(w in low for w in ("introduction", "preface", "foreword", "prologue")):
+            if current_state in (_BookState.FRONT, _BookState.TOC):
+                return _BookState.BODY
+            return _BookState.BODY
+        if any(w in low for w in ("conclusion", "epilogue", "afterword")):
+            return _BookState.BODY
+    return current_state
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Public API: Structure Detection
+# ═══════════════════════════════════════════════════════════════════════════
+
+def detect_structure(
     pages: list[PageText],
     debug: bool = False,
-    min_confidence: float = 0.80,
-) -> list[Chapter]:
-    """Scan pages for chapter headings, returning chapter boundaries.
+) -> tuple[list[Section], list[HeadingMatch]]:
+    """Detect book structure from page text.
 
-    Uses strict pattern matching with confidence scores. Prefers fewer,
-    correct headings over more, potentially wrong ones.
+    Returns:
+        sections: list of Section objects with boundaries
+        all_matches: list of all HeadingMatch objects (for debugging)
     """
     if not pages:
-        return []
+        return [], []
 
-    candidates = _find_heading_candidates(pages, debug)
-    accepted = _filter_candidates(candidates, min_confidence, debug)
+    # Pass 1: Find all heading candidates
+    raw_matches = _scan_for_headings(pages, debug)
 
-    if not accepted:
+    # Pass 2: Resolve bare numbers — look at the next line(s) for a title
+    resolved = _resolve_bare_numbers(raw_matches, pages, debug)
+
+    # Pass 3: Deduplicate (keep later occurrence for same heading)
+    deduped = _deduplicate(resolved, debug)
+
+    # Pass 4: Remove TOC clusters
+    filtered = _remove_toc_clusters(deduped, debug)
+
+    # Pass 5: Assign section kinds via state machine (also filters out
+    # structural headings that appear inside back matter)
+    filtered = _assign_kinds(filtered)
+
+    # Pass 6: Build section list
+    if not filtered:
         if debug:
-            print("[chapter-detect] No headings found — treating as one section", file=sys.stderr)
-        return [Chapter(
+            print("[structure] No headings found — one big section", file=sys.stderr)
+        sections = [Section(
             name="Full Book",
             start_page=pages[0].page_number,
             end_page=pages[-1].page_number,
@@ -167,29 +247,44 @@ def detect_chapters(
             confidence=1.0,
             detection_reason="no headings detected",
         )]
+        return sections, raw_matches
 
-    chapters = _build_chapters(accepted, pages)
+    sections = _build_sections(filtered, pages)
 
     if debug:
-        print(f"\n[chapter-detect] Final chapter list ({len(chapters)}):", file=sys.stderr)
-        for ch in chapters:
-            print(f"  p.{ch.start_page}-{ch.end_page}  [{ch.kind.value}]  "
-                  f"conf={ch.confidence:.2f}  {ch.name!r}  ({ch.detection_reason})",
-                  file=sys.stderr)
+        print(f"\n[structure] Final sections ({len(sections)}):", file=sys.stderr)
+        for s in sections:
+            print(f"  p.{s.start_page:>3d}-{s.end_page:<3d}  "
+                  f"[{s.kind.value:12s}]  conf={s.confidence:.2f}  "
+                  f"{s.name!r}  ({s.detection_reason})", file=sys.stderr)
 
-    return chapters
+    return sections, raw_matches
 
+
+def detect_chapters(
+    pages: list[PageText],
+    debug: bool = False,
+    min_confidence: float = 0.0,  # kept for API compat; filtering is internal now
+) -> list[Chapter]:
+    """Backward-compatible wrapper around detect_structure."""
+    sections, _ = detect_structure(pages, debug=debug)
+    return sections
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Public API: Chunking
+# ═══════════════════════════════════════════════════════════════════════════
 
 def chunk_pages(
     pages: list[PageText],
-    chapters: list[Chapter],
+    chapters: list[Section],
     book_id: str,
     title: str,
     author: str,
     source_path: str,
     config: ChunkingConfig,
 ) -> list[Chunk]:
-    """Split page text into overlapping chunks, respecting chapter boundaries."""
+    """Split page text into overlapping chunks, respecting section boundaries."""
     chunks: list[Chunk] = []
     global_index = 0
 
@@ -232,188 +327,221 @@ def chunk_pages(
     return chunks
 
 
-# ---------------------------------------------------------------------------
-# Heading detection internals
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
+# Internal: Heading scanning
+# ═══════════════════════════════════════════════════════════════════════════
 
-def _find_heading_candidates(pages: list[PageText], debug: bool) -> list[_Candidate]:
-    """First pass: collect every line that matches a heading pattern."""
-    candidates: list[_Candidate] = []
+def _scan_for_headings(pages: list[PageText], debug: bool) -> list[HeadingMatch]:
+    """First pass: collect every line matching a heading pattern."""
+    matches: list[HeadingMatch] = []
 
     for page in pages:
-        for line in page.text.split("\n"):
+        lines = page.text.split("\n")
+        for line in lines:
             stripped = line.strip()
             if not stripped:
                 continue
 
-            # Hard length limits: headings are short
-            if len(stripped) > 80 or len(stripped) < 3:
+            # Length guard: real headings are short
+            if len(stripped) > 60:
                 continue
 
-            # Reject TOC-style lines (dot leaders, trailing page numbers)
-            if _TOC_INDICATORS.search(stripped):
+            # Reject TOC-style lines
+            if _is_toc_line(stripped):
+                continue
+
+            # Reject sentences (unless it's a very short line)
+            if len(stripped) > 5 and _is_sentence(stripped):
+                continue
+
+            # Reject notes-section chapter references
+            if _is_notes_reference(stripped):
                 if debug:
-                    print(f"  [reject-toc]  p.{page.page_number}  {stripped!r}", file=sys.stderr)
+                    print(f"  [reject-noteref] p.{page.page_number}  {stripped!r}", file=sys.stderr)
                 continue
 
-            # Reject lines that look like sentences
-            if _SENTENCE_RE.search(stripped):
-                if debug:
-                    print(f"  [reject-sent] p.{page.page_number}  {stripped!r}", file=sys.stderr)
-                continue
-
-            # Try each heading rule
-            for pattern, confidence, reason in _HEADING_RULES:
+            # Try each heading pattern
+            for pattern, confidence, htype, kind in _HEADING_PATTERNS:
                 if pattern.match(stripped):
-                    heading = _normalise_heading(stripped)
-                    candidates.append(_Candidate(
+                    label = _normalise_heading(stripped)
+                    matches.append(HeadingMatch(
                         page=page.page_number,
-                        text=heading,
+                        raw_text=stripped,
+                        label=label,
+                        heading_type=htype,
                         confidence=confidence,
-                        reason=reason,
+                        reason=f"matched {htype} pattern",
+                        kind=kind,
                     ))
                     if debug:
-                        print(f"  [candidate]   p.{page.page_number}  conf={confidence:.2f}  "
-                              f"{reason:20s}  {heading!r}", file=sys.stderr)
+                        print(f"  [match]  p.{page.page_number:>3d}  "
+                              f"conf={confidence:.2f}  {htype:20s}  {label!r}",
+                              file=sys.stderr)
                     break
 
-    return candidates
+    return matches
 
 
-def _filter_candidates(
-    candidates: list[_Candidate],
-    min_confidence: float,
+def _resolve_bare_numbers(
+    matches: list[HeadingMatch],
+    pages: list[PageText],
     debug: bool,
-) -> list[_Candidate]:
-    """Second pass: deduplicate, reject low-confidence, reject TOC clusters."""
-    if not candidates:
-        return []
+) -> list[HeadingMatch]:
+    """For 'bare_number' matches, look at the next non-empty line on the same
+    page for a chapter title. E.g. page has '1' then 'A Lopsided Arms Race'.
+    """
+    page_text: dict[int, str] = {p.page_number: p.text for p in pages}
+    resolved: list[HeadingMatch] = []
 
-    # 1. Filter by confidence
-    filtered = [c for c in candidates if c.confidence >= min_confidence]
+    for m in matches:
+        if m.heading_type != "bare_number":
+            resolved.append(m)
+            continue
 
-    # 2. Deduplicate: if the same heading text appears on multiple pages,
-    #    keep only the LATER occurrence (the real chapter, not the TOC entry).
-    seen: dict[str, _Candidate] = {}
-    for c in filtered:
-        key = c.text.lower()
+        # Find the line after the number on the same page
+        text = page_text.get(m.page, "")
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        title_line = None
+        found_number = False
+        for line in lines:
+            if found_number:
+                # Next non-empty line after the number
+                if len(line) < 60 and not _is_sentence(line) and len(line) > 2:
+                    title_line = line
+                break
+            if line == m.raw_text:
+                found_number = True
+
+        if title_line:
+            new_label = f"Chapter {m.raw_text}: {_normalise_heading(title_line)}"
+            m.label = new_label
+            m.confidence = 0.92
+            m.reason = f"bare number {m.raw_text!r} + title {title_line!r}"
+        else:
+            new_label = f"Chapter {m.raw_text}"
+            m.label = new_label
+            m.reason = f"bare number {m.raw_text!r} (no title found on same page)"
+
+        if debug:
+            print(f"  [resolve] p.{m.page:>3d}  {m.raw_text!r} → {m.label!r}", file=sys.stderr)
+
+        resolved.append(m)
+
+    return resolved
+
+
+def _deduplicate(matches: list[HeadingMatch], debug: bool) -> list[HeadingMatch]:
+    """If the same heading appears on multiple pages, keep the later one."""
+    seen: dict[str, HeadingMatch] = {}
+    for m in matches:
+        key = m.label.lower()
         if key in seen:
             if debug:
-                print(f"  [dedup]       p.{seen[key].page} → p.{c.page}  {c.text!r}  "
-                      f"(keeping later)", file=sys.stderr)
-        seen[key] = c
-    filtered = sorted(seen.values(), key=lambda c: c.page)
-
-    # 3. Reject TOC clusters: if many headings appear within a small page range
-    #    (e.g. 5+ headings within 3 pages), that's a table of contents, not real
-    #    chapter starts. Remove them.
-    filtered = _remove_toc_clusters(filtered, debug)
-
-    # 4. Reject if only 1 heading found and it's on page 1-2 (likely TOC/title page)
-    if len(filtered) == 1 and filtered[0].page <= 2:
-        if debug:
-            print(f"  [reject-solo] p.{filtered[0].page}  {filtered[0].text!r}  "
-                  f"(only heading, too early)", file=sys.stderr)
-        return []
-
-    return filtered
+                print(f"  [dedup]  p.{seen[key].page} → p.{m.page}  {m.label!r}", file=sys.stderr)
+        seen[key] = m
+    return sorted(seen.values(), key=lambda m: m.page)
 
 
-def _remove_toc_clusters(candidates: list[_Candidate], debug: bool) -> list[_Candidate]:
-    """Remove clusters of headings that are likely a table of contents."""
-    if len(candidates) < 4:
-        return candidates
+def _remove_toc_clusters(matches: list[HeadingMatch], debug: bool) -> list[HeadingMatch]:
+    """If 5+ headings appear within 2 pages, it's a TOC — remove them."""
+    if len(matches) < 5:
+        return matches
 
-    # Sliding window: if 4+ headings fall within 3 pages, it's a TOC cluster
     toc_pages: set[int] = set()
-    window_size = 3  # pages
-
-    for i in range(len(candidates)):
-        cluster = [candidates[i]]
-        for j in range(i + 1, len(candidates)):
-            if candidates[j].page - candidates[i].page <= window_size:
-                cluster.append(candidates[j])
+    for i in range(len(matches)):
+        cluster = [matches[i]]
+        for j in range(i + 1, len(matches)):
+            if matches[j].page - matches[i].page <= 2:
+                cluster.append(matches[j])
             else:
                 break
-        if len(cluster) >= 4:
+        if len(cluster) >= 5:
             for c in cluster:
                 toc_pages.add(c.page)
 
     if not toc_pages:
-        return candidates
+        return matches
 
     result = []
-    for c in candidates:
-        if c.page in toc_pages:
+    for m in matches:
+        if m.page in toc_pages:
             if debug:
-                print(f"  [reject-cluster] p.{c.page}  {c.text!r}  "
-                      f"(TOC cluster)", file=sys.stderr)
+                print(f"  [reject-toc-cluster] p.{m.page}  {m.label!r}", file=sys.stderr)
         else:
-            result.append(c)
-
+            result.append(m)
     return result
 
 
-def _build_chapters(
-    accepted: list[_Candidate],
+def _assign_kinds(matches: list[HeadingMatch]) -> list[HeadingMatch]:
+    """Walk through matches with the state machine and set .kind.
+
+    Once in BACK state, suppress structural headings (Introduction, Conclusion,
+    etc.) because they're likely note-section headers, not real book sections.
+    Returns the filtered list.
+    """
+    state = _BookState.FRONT
+    result: list[HeadingMatch] = []
+    for m in matches:
+        new_state = _classify_state_transition(m, state)
+
+        # Once in back matter, reject structural headings that reappear
+        # (e.g. "INTRODUCTION" as a notes sub-header)
+        if state == _BookState.BACK and m.heading_type == "structural":
+            continue
+        # Also reject bare numbers inside back matter (page numbers, note numbers)
+        if state == _BookState.BACK and m.heading_type == "bare_number":
+            continue
+
+        state = new_state
+        if state == _BookState.BACK:
+            m.kind = SectionKind.BACK_MATTER
+        elif state == _BookState.FRONT:
+            m.kind = SectionKind.FRONT_MATTER
+        else:
+            m.kind = SectionKind.BODY
+        result.append(m)
+    return result
+
+
+def _build_sections(
+    matches: list[HeadingMatch],
     pages: list[PageText],
-) -> list[Chapter]:
-    """Turn accepted heading candidates into Chapter objects with boundaries."""
-    chapters: list[Chapter] = []
+) -> list[Section]:
+    """Convert matched headings into Section objects with page boundaries."""
+    sections: list[Section] = []
     first_page = pages[0].page_number
     last_page = pages[-1].page_number
 
-    # Front matter: everything before the first heading
-    if accepted[0].page > first_page:
-        chapters.append(Chapter(
+    # Front matter: pages before the first heading
+    if matches[0].page > first_page:
+        sections.append(Section(
             name="Front Matter",
             start_page=first_page,
-            end_page=accepted[0].page - 1,
+            end_page=matches[0].page - 1,
             kind=SectionKind.FRONT_MATTER,
             confidence=1.0,
             detection_reason="pages before first heading",
         ))
 
-    for idx, cand in enumerate(accepted):
-        end = (accepted[idx + 1].page - 1
-               if idx + 1 < len(accepted)
+    for idx, m in enumerate(matches):
+        end = (matches[idx + 1].page - 1
+               if idx + 1 < len(matches)
                else last_page)
-
-        kind = _classify_kind(cand)
-
-        chapters.append(Chapter(
-            name=cand.text,
-            start_page=cand.page,
+        sections.append(Section(
+            name=m.label,
+            start_page=m.page,
             end_page=end,
-            kind=kind,
-            confidence=cand.confidence,
-            detection_reason=cand.reason,
+            kind=m.kind,
+            confidence=m.confidence,
+            detection_reason=m.reason,
         ))
 
-    # If the last chapter is back matter and it's very large (>30% of book),
-    # split it: keep only a reasonable portion
-    if len(chapters) > 1 and chapters[-1].kind == SectionKind.BACK_MATTER:
-        total_pages = last_page - first_page + 1
-        back_pages = chapters[-1].end_page - chapters[-1].start_page + 1
-        if back_pages > total_pages * 0.3:
-            chapters[-1].detection_reason += " (unusually large — review manually)"
-
-    return chapters
+    return sections
 
 
-def _classify_kind(cand: _Candidate) -> SectionKind:
-    """Determine whether a heading belongs to body or back matter."""
-    low = cand.text.lower()
-    if cand.reason == "back matter":
-        return SectionKind.BACK_MATTER
-    if any(w in low for w in ("introduction", "preface", "foreword", "prologue")):
-        return SectionKind.FRONT_MATTER
-    return SectionKind.BODY
-
-
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
 # Text utilities
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
 
 def _normalise_heading(text: str) -> str:
     text = unicodedata.normalize("NFKC", text).strip()
