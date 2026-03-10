@@ -74,6 +74,9 @@ def ingest_book(
 
     # 4. Detect chapters
     chapters: list[Chapter] = detect_chapters(pages)
+    for ch in chapters:
+        print(f"  [{ch.kind.value:12s}]  p.{ch.start_page:>3d}-{ch.end_page:<3d}  "
+              f"conf={ch.confidence:.2f}  {ch.name}")
 
     # 5. Chunk
     chunks: list[Chunk] = chunk_pages(
@@ -83,6 +86,12 @@ def ingest_book(
     # 6. Store
     embedder = OllamaEmbedder(config.embedding)
     store = VectorStore(config.vectorstore, embedder)
+
+    # Re-ingest from scratch: remove any existing chunks for this book_id first
+    existing = store.get_book_info(book_id)
+    if existing:
+        store.delete_book(book_id)
+        print(f"Replacing previous ingestion for '{book_id}' ({existing.get('total_chunks', 0)} chunks removed).")
 
     print(f"Embedding {len(chunks)} chunks (this may take a while) …")
     store.add_chunks(chunks)
