@@ -36,6 +36,10 @@ class SectionKind(Enum):
     BACK_MATTER = "Back Matter"
 
 
+SECTION_TYPES_SUMMARIZABLE = {"introduction", "chapter", "conclusion", "epilogue", "appendix"}
+SECTION_TYPES_SKIPPABLE = {"front_matter", "toc", "acknowledgments", "notes", "index", "about_author", "unknown"}
+
+
 @dataclass
 class HeadingMatch:
     """A detected heading candidate with provenance."""
@@ -46,6 +50,8 @@ class HeadingMatch:
     confidence: float
     reason: str         # human-readable explanation of why it matched
     kind: SectionKind = SectionKind.BODY
+    section_type: str = "unknown"
+    parent: str = ""
 
 
 @dataclass
@@ -57,6 +63,8 @@ class Section:
     kind: SectionKind = SectionKind.BODY
     confidence: float = 1.0
     detection_reason: str = ""
+    section_type: str = "unknown"  # normalised type: chapter, part, introduction, etc.
+    parent: str = ""               # parent section name (e.g. "PART 1" for chapters)
 
 
 # Keep backward compat — other modules import "Chapter"
@@ -76,6 +84,7 @@ class Chunk:
     chunk_index: int
     parent_section_id: str
     page_range: str
+    section_type: str = "unknown"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -319,8 +328,9 @@ def chunk_pages(
                 section="",
                 source_path=source_path,
                 chunk_index=global_index,
-                parent_section_id=chapter.name,
+                parent_section_id=chapter.parent or chapter.name,
                 page_range=f"{start_p}-{end_p}",
+                section_type=chapter.section_type,
             ))
             global_index += 1
 
@@ -503,6 +513,86 @@ def _assign_kinds(matches: list[HeadingMatch]) -> list[HeadingMatch]:
     return result
 
 
+def _infer_section_type(heading_type: str, label: str) -> str:
+    """Map a heading match to a normalised section_type string."""
+    low = label.lower()
+    if heading_type == "part":
+        return "part"
+    if heading_type in ("bare_number", "chapter_keyword", "numbered_dot_title"):
+        return "chapter"
+    if heading_type == "structural":
+        if "introduction" in low:
+            return "introduction"
+        if "conclusion" in low:
+            return "conclusion"
+        if "preface" in low or "foreword" in low or "prologue" in low:
+            return "introduction"
+        if "epilogue" in low or "afterword" in low:
+            return "epilogue"
+        if "appendix" in low:
+            return "appendix"
+        return "chapter"
+    if heading_type == "back_matter":
+        if "acknowledg" in low:
+            return "acknowledgments"
+        if "note" in low or "endnote" in low:
+            return "notes"
+        if "index" in low:
+            return "index"
+        if "about" in low and "author" in low:
+            return "about_author"
+        if "bibliograph" in low or "reference" in low:
+            return "notes"
+        if "glossary" in low:
+            return "notes"
+        return "notes"
+    return "unknown"
+
+
+def _try_split_introduction_from_front_matter(
+    front_section: Section,
+    pages: list[PageText],
+) -> list[Section]:
+    """If Front Matter contains a page where 'Introduction' appears as a
+    heading-like line, split it into Front Matter + Introduction."""
+    intro_re = re.compile(r"^\s*Introduction\s*$", re.IGNORECASE)
+    for p in pages:
+        if p.page_number < front_section.start_page or p.page_number > front_section.end_page:
+            continue
+        for line in p.text.split("\n"):
+            if intro_re.match(line.strip()):
+                # Only split if there's meaningful front matter before it
+                if p.page_number > front_section.start_page:
+                    return [
+                        Section(
+                            name="Front Matter",
+                            start_page=front_section.start_page,
+                            end_page=p.page_number - 1,
+                            kind=SectionKind.FRONT_MATTER,
+                            confidence=1.0,
+                            detection_reason="pages before Introduction",
+                            section_type="front_matter",
+                        ),
+                        Section(
+                            name="Introduction",
+                            start_page=p.page_number,
+                            end_page=front_section.end_page,
+                            kind=SectionKind.BODY,
+                            confidence=0.85,
+                            detection_reason="Introduction heading found inside front matter",
+                            section_type="introduction",
+                        ),
+                    ]
+                else:
+                    front_section.name = "Introduction"
+                    front_section.kind = SectionKind.BODY
+                    front_section.section_type = "introduction"
+                    front_section.confidence = 0.85
+                    front_section.detection_reason = "Introduction heading on first page of front matter"
+                    return [front_section]
+    return [front_section]
+
+
 def _build_sections(
     matches: list[HeadingMatch],
     pages: list[PageText],
@@ -514,19 +604,27 @@ def _build_sections(
 
     # Front matter: pages before the first heading
     if matches[0].page > first_page:
-        sections.append(Section(
+        front = Section(
             name="Front Matter",
             start_page=first_page,
             end_page=matches[0].page - 1,
             kind=SectionKind.FRONT_MATTER,
             confidence=1.0,
             detection_reason="pages before first heading",
-        ))
+            section_type="front_matter",
+        )
+        sections.extend(_try_split_introduction_from_front_matter(front, pages))
 
+    # Track current part for parent assignment
+    current_part = ""
     for idx, m in enumerate(matches):
         end = (matches[idx + 1].page - 1
                if idx + 1 < len(matches)
                else last_page)
+        stype = _infer_section_type(m.heading_type, m.label)
+        if stype == "part":
+            current_part = m.label
+        parent = current_part if stype == "chapter" else ""
         sections.append(Section(
             name=m.label,
             start_page=m.page,
@@ -534,6 +632,8 @@ def _build_sections(
             kind=m.kind,
             confidence=m.confidence,
             detection_reason=m.reason,
+            section_type=stype,
+            parent=parent,
         ))
 
     return sections

@@ -141,6 +141,7 @@ def _chunk_meta(c: Chunk) -> dict:
         "chunk_index": c.chunk_index,
         "parent_section_id": c.parent_section_id,
         "page_range": c.page_range,
+        "section_type": c.section_type,
     }
 
 

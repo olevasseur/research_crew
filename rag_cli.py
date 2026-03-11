@@ -4,12 +4,13 @@
 Usage:
     python rag_cli.py ingest <file>       [--title T] [--author A] [--book-id ID]
     python rag_cli.py ingest-folder <dir>
-    python rag_cli.py summarize <book_id> [--verify]
+    python rag_cli.py summarize <book_id> [--mode MODE] [--verify]
     python rag_cli.py verify <book_id>
     python rag_cli.py compare <book_id> <book_id> [<book_id> ...]
     python rag_cli.py ask "<question>"    [--books <id,id,...>]
     python rag_cli.py inspect books
     python rag_cli.py inspect chunks <book_id> [--chapter CH]
+    python rag_cli.py inspect structure <book_id>
     python rag_cli.py inspect summary <book_id>
     python rag_cli.py inspect search "<query>" [--book <book_id>]
     python rag_cli.py inspect-structure <file>  [--debug]
@@ -43,11 +44,25 @@ def cmd_ingest_folder(args):
 
 
 def cmd_summarize(args):
-    from rag.analysis import analyse_book
+    from rag.analysis import analyse_book, SUMMARIZE_MODES
     from rag.critic import verify_book_summary
     config = load_config(args.config)
-    print(f"Analysing '{args.book_id}' …\n")
-    analyse_book(args.book_id, config)
+
+    mode = args.mode
+    if mode not in SUMMARIZE_MODES:
+        print(f"Unknown mode '{mode}'. Available: {', '.join(SUMMARIZE_MODES)}")
+        return
+
+    include_types = args.include.split(",") if args.include else None
+    exclude_types = args.exclude.split(",") if args.exclude else None
+
+    print(f"Analysing '{args.book_id}' (mode={mode}) …\n")
+    analyse_book(
+        args.book_id, config,
+        mode=mode,
+        include_types=include_types,
+        exclude_types=exclude_types,
+    )
     if args.verify:
         print("\nRunning verification …")
         verify_book_summary(args.book_id, config)
@@ -112,8 +127,12 @@ def cmd_inspect(args):
             print("Usage: inspect summary <book_id>")
             return
         inspect_utils.inspect_summary(args.book_id, config)
+    elif args.what == "structure":
+        if not args.book_id:
+            print("Usage: inspect structure <book_id>")
+            return
+        inspect_utils.inspect_structure(args.book_id, config)
     elif args.what == "search":
-        # For "inspect search", the query can be the second positional or --query
         query = args.query or args.book_id
         if not query:
             print("Usage: inspect search \"<query>\" [--book <book_id>]")
@@ -145,6 +164,13 @@ def main():
     # --- summarize ---
     p_sum = sub.add_parser("summarize", help="Analyse and summarise a book")
     p_sum.add_argument("book_id")
+    p_sum.add_argument("--mode", default="default",
+                       choices=["default", "body-only", "chapter-only", "full", "back-matter"],
+                       help="Which sections to include (default: intro+chapters+conclusion)")
+    p_sum.add_argument("--include", default=None,
+                       help="Extra section_types to include (comma-separated)")
+    p_sum.add_argument("--exclude", default=None,
+                       help="Section_types to exclude (comma-separated)")
     p_sum.add_argument("--verify", action="store_true", help="Run critic after summarising")
     p_sum.set_defaults(func=cmd_summarize)
 
@@ -172,7 +198,7 @@ def main():
 
     # --- inspect ---
     p_ins = sub.add_parser("inspect", help="Inspect data and results")
-    p_ins.add_argument("what", choices=["books", "chunks", "summary", "search"])
+    p_ins.add_argument("what", choices=["books", "chunks", "summary", "search", "structure"])
     p_ins.add_argument("book_id", nargs="?", default=None)
     p_ins.add_argument("--chapter", default=None)
     p_ins.add_argument("--query", default=None)

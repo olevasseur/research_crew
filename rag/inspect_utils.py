@@ -71,6 +71,49 @@ def inspect_summary(book_id: str, config: RAGConfig) -> None:
             print(f"  {name}: not yet generated")
 
 
+def inspect_structure(book_id: str, config: RAGConfig) -> None:
+    """Print the detected section structure for an ingested book."""
+    embedder = OllamaEmbedder(config.embedding)
+    store = VectorStore(config.vectorstore, embedder)
+    info = store.get_book_info(book_id)
+    if not info:
+        print(f"Book '{book_id}' not found. Ingest it first.")
+        return
+    sections = info.get("sections", [])
+    if not sections:
+        print(f"No section metadata stored for '{book_id}'. Re-ingest to populate.")
+        return
+
+    title = info.get("title", "?")
+    author = info.get("author", "?")
+    print(f"\nStructure of \"{title}\" by {author}")
+    print(f"{'=' * 72}")
+    fmt = "{idx:>3}  {label:<40s}  {stype:<16s}  p.{start:>3d}-{end:<3d}  ({count:>3d} pp)"
+    header = f"{'#':>3}  {'Label':<40s}  {'Type':<16s}  {'Pages':>11s}  {'Count':>7s}"
+    print(header)
+    print("-" * 72)
+    for i, s in enumerate(sections, 1):
+        parent = s.get("parent", "")
+        label = s.get("name", "?")
+        if parent:
+            label = f"  └─ {label}"
+        start = s.get("start_page", 0)
+        end = s.get("end_page", 0)
+        print(fmt.format(
+            idx=i,
+            label=label,
+            stype=s.get("section_type", "unknown"),
+            start=start,
+            end=end,
+            count=end - start + 1,
+        ))
+        conf = s.get("confidence", 0)
+        reason = s.get("detection_reason", "")
+        if reason:
+            print(f"     {'':40s}  conf={conf:.2f}  {reason}")
+    print()
+
+
 def inspect_retrieval(query: str, config: RAGConfig, book_id: str | None = None) -> None:
     """Run a retrieval query and print the results with metadata."""
     retrieval = Retrieval(config)

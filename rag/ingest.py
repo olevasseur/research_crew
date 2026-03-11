@@ -98,7 +98,19 @@ def ingest_book(
     print(f"Embedding {len(chunks)} chunks (this may take a while) …")
     store.add_chunks(chunks)
 
-    # 7. Register book metadata
+    # 7. Register book metadata (including full section structure)
+    section_meta = [
+        {
+            "name": c.name,
+            "section_type": c.section_type,
+            "start_page": c.start_page,
+            "end_page": c.end_page,
+            "parent": c.parent,
+            "confidence": c.confidence,
+            "detection_reason": c.detection_reason,
+        }
+        for c in chapters
+    ]
     chapter_names = [c.name for c in chapters]
     store.register_book(book_id, {
         "title": title,
@@ -107,6 +119,7 @@ def ingest_book(
         "total_pages": len(pages),
         "total_chunks": len(chunks),
         "chapters": chapter_names,
+        "sections": section_meta,
     })
 
     summary = {
@@ -117,7 +130,7 @@ def ingest_book(
         "total_chunks": len(chunks),
         "chapters": chapter_names,
     }
-    print(f"Ingested '{title}' → {len(chunks)} chunks, {len(chapters)} chapters")
+    print(f"Ingested '{title}' → {len(chunks)} chunks, {len(chapters)} sections")
     return summary
 
 
