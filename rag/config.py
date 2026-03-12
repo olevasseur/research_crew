@@ -25,6 +25,7 @@ class ChunkingConfig:
     target_size: int = 1500
     overlap: int = 200
     min_chunk_size: int = 100
+    max_chunk_size: int = 2000
 
 
 @dataclass

@@ -1,7 +1,9 @@
-"""Book analysis: per-section insights and full-book summary.
+"""Book analysis: hierarchical summarization with subchunk granularity.
 
-Uses deterministic retrieval + direct LLM calls for each section, then
-synthesises a full book summary.  Every claim is grounded in source chunks.
+Pipeline:
+  1. For each section, summarize each subchunk individually (small, faithful).
+  2. Synthesize per-section summary from subchunk summaries.
+  3. Synthesize full-book summary from section summaries.
 
 Structure-aware: only meaningful body content is summarised by default.
 """
@@ -34,7 +36,6 @@ def resolve_section_filter(
     include_types: list[str] | None = None,
     exclude_types: list[str] | None = None,
 ) -> set[str]:
-    """Build the set of section_types to include based on mode + overrides."""
     allowed = set(SUMMARIZE_MODES.get(mode, SUMMARIZE_MODES["default"]))
     if include_types:
         allowed |= set(include_types)
@@ -44,56 +45,102 @@ def resolve_section_filter(
 
 
 # ---------------------------------------------------------------------------
-# System prompts
+# Prompts — subchunk level
 # ---------------------------------------------------------------------------
 
-ANALYST_SYSTEM = """\
-You are a book analysis expert. You extract structured insights from book chapters.
+SUBCHUNK_SYSTEM = """\
+You are a close-reading analyst. Extract key content from a book excerpt.
 Rules:
-- Only make claims supported by the source text you are given.
-- Be specific: use names, numbers, concrete details from the text.
-- Cite page numbers when shown as [p.N] in the source.
-- If the chapter has no notable content, say so briefly."""
+- Only state what is explicitly in the text. No interpretation beyond what is written.
+- Use specific names, numbers, examples from the text.
+- Cite page numbers as [p.N] when present in the source.
+- Be concise: aim for 150-300 words per subchunk summary."""
 
-CHAPTER_PROMPT = """\
-Analyse the following section from "{title}" by {author}.
-
-Section: {chapter}
-Section type: {section_type}
+SUBCHUNK_PROMPT = """\
+Excerpt from "{title}" by {author}
+Section: {section_label} ({section_type})
 Pages: {page_range}
+Chunk ID: {chunk_id}
 
-Source text (from the book — these are verbatim excerpts):
-{chunks}
+--- TEXT ---
+{text}
+--- END TEXT ---
 
-Produce the following sections. Be thorough but dense; no filler.
+Extract from this excerpt ONLY:
 
-### Core Ideas
-2–5 key ideas. State the argument or claim, not just the topic.
+**Key claims**: The specific arguments or assertions made. State the claim, not the topic.
 
-### Key Examples
-The most important examples, case studies, or stories with context (who, what, outcome).
-If none, write "No named example in this section."
+**Evidence & examples**: Named people, studies, statistics, anecdotes with concrete details (who, what, outcome). If none, say "None in this excerpt."
+
+**Frameworks/concepts**: Any named or described framework, model, or defined term. If none, say "None."
+
+**Actionable points**: Specific advice or prescriptions the author gives. If none, say "None."
+
+Do NOT add generic commentary. Only report what this specific excerpt contains."""
+
+# ---------------------------------------------------------------------------
+# Prompts — section level
+# ---------------------------------------------------------------------------
+
+SECTION_SYSTEM = """\
+You are a book analysis expert. Synthesize subchunk summaries into a coherent section summary.
+Rules:
+- Preserve specific details: names, numbers, examples, page references.
+- Deduplicate overlapping content (chunks may overlap).
+- Flag the section's core argument distinctly from supporting details.
+- No generic filler. Every sentence should carry information."""
+
+SECTION_PROMPT = """\
+Synthesize these subchunk summaries into a summary of section "{section_label}" from "{title}" by {author}.
+Section type: {section_type} | Pages: {page_range} | Based on {n_chunks} subchunks.
+
+--- SUBCHUNK SUMMARIES ---
+{subchunk_summaries}
+--- END ---
+
+Produce:
+
+### Core Argument
+One paragraph: what is the main claim or purpose of this section? Be specific.
+
+### Key Supporting Ideas
+3–5 bullet points. Each should state a distinct idea, not repeat the core argument.
+
+### Strongest Examples
+The most compelling examples, case studies, or stories. Include who/what/outcome.
+If none, write "No concrete examples in this section."
 
 ### Frameworks & Mental Models
-Named or implied frameworks with a short description of how each works.
+Named or described frameworks. For each: name and one-sentence description.
+If none, write "None introduced in this section."
 
 ### Actionable Takeaways
-Concrete, specific actions a reader could take.
+Concrete actions a reader could take based on this section.
+If none, write "No specific actions prescribed."
 
 ### Notable Quotes
-1–3 verbatim quotes with page numbers. If none, write "No notable quote extracted."
-"""
+1–2 verbatim quotes with page numbers, only if clearly present in the subchunk summaries.
+If none, write "No direct quotes extracted."
+
+### Source Chunks
+List the chunk IDs used: {chunk_ids}"""
+
+# ---------------------------------------------------------------------------
+# Prompts — book level
+# ---------------------------------------------------------------------------
 
 BOOK_SYNTHESIS_SYSTEM = """\
-You are a book summary synthesiser. You produce polished, structured summaries
-from chapter analyses. Keep it dense and high-signal. No padding."""
+You are a book summary synthesiser. Produce a polished, structured summary
+from section analyses. Every sentence must carry information. No padding or
+vague references to "balance" or "intentionality" unless they are central
+and specifically defined in the text."""
 
 BOOK_SYNTHESIS_PROMPT = """\
 Synthesise the section analyses below into a structured summary of
 "{title}" by {author}.
 
 Section Analyses:
-{chapter_summaries}
+{section_summaries}
 
 Output these sections in order:
 
@@ -101,27 +148,32 @@ Output these sections in order:
 - **Title**: {title}
 - **Author**: {author}
 - **Domain/Category**: (infer from content)
-- **One-paragraph summary**: central thesis of the book
+- **Central thesis**: One paragraph. State the author's core argument with specificity.
 
-## Chapter-by-Chapter Summary
-For each section, a focused paragraph with distinct content (core idea, top example,
-top actionable item, any frameworks). Each chapter MUST add at least one idea not
-restated from another chapter.
+## Section-by-Section Summary
+For each analysed section, one focused paragraph containing:
+- The section's core argument (not a topic label, but the actual claim)
+- The strongest example or piece of evidence
+- Any framework introduced
+- One actionable takeaway if present
+Each section MUST contribute at least one idea not found in other sections.
 
 ## Cross-Cutting Themes
-3–7 themes that recur across chapters.
+3–7 themes that recur across sections. For each theme:
+- **Theme**: name
+- **How it appears**: specific instances across sections (not generic descriptions)
 
 ## Frameworks & Mental Models (Quick Reference)
-Consolidated list. For each: **Name** — one-line description.
+For each: **Name** — one-sentence description with the section it comes from.
 
 ## Top Actionable Items
-5–10 most impactful DISTINCT actions ranked by impact. Do not pad with restatements.
+5–10 most impactful DISTINCT actions ranked by impact.
+Each must be specific enough to act on without re-reading the book.
 
 ## Connections & Building Blocks
-Ideas that could pair with concepts from other domains (software engineering,
-business strategy, investing, entrepreneurship, productivity). For each:
+Ideas from this book that could combine with concepts from other domains:
 - **Idea from this book**: brief description
-- **Could pair with**: type of concept/domain
+- **Could pair with**: specific domain/concept
 - **Why**: what the combination could produce
 """
 
@@ -137,13 +189,7 @@ def analyse_book(
     include_types: list[str] | None = None,
     exclude_types: list[str] | None = None,
 ) -> dict:
-    """Run full book analysis. Returns dict with chapter_insights and book_summary.
-
-    Args:
-        mode: one of "default", "body-only", "chapter-only", "full", "back-matter"
-        include_types: extra section_types to include
-        exclude_types: section_types to exclude
-    """
+    """Hierarchical book analysis: subchunks → sections → book."""
     retrieval = Retrieval(config)
     llm = LLMClient(config.generation)
 
@@ -158,13 +204,11 @@ def analyse_book(
 
     allowed_types = resolve_section_filter(mode, include_types, exclude_types)
 
-    # Build a lookup: section name → metadata
-    meta_by_name: dict[str, dict] = {}
-    for s in sections_meta:
-        meta_by_name[s["name"]] = s
+    meta_by_name: dict[str, dict] = {s["name"]: s for s in sections_meta}
 
-    # -- per-section analysis --
-    chapter_insights: list[dict] = []
+    section_results: list[dict] = []
+    total_llm_calls = 0
+
     for ch in chapters:
         meta = meta_by_name.get(ch, {})
         stype = meta.get("section_type", "unknown")
@@ -179,67 +223,110 @@ def analyse_book(
 
         chunks = retrieval.get_chapter_chunks(book_id, ch)
         if not chunks:
-            chapter_insights.append({
-                "chapter": ch, "section_type": stype,
-                "page_range": page_range, "parent": parent,
-                "summary": "(no content)", "chunk_ids": [],
-            })
             print(f"  ⊘ SKIP  {ch}  (no chunks)")
             continue
 
-        chunk_text = retrieval.format_chunks_for_prompt(chunks)
-        prompt = CHAPTER_PROMPT.format(
-            title=title, author=author, chapter=ch,
-            section_type=stype, page_range=page_range,
-            chunks=chunk_text,
+        chunks.sort(key=lambda c: c.get("chunk_index", 0))
+        chunk_ids = [c["id"] for c in chunks]
+
+        # --- Phase 1: Summarize each subchunk ---
+        print(f"  ▶ {ch}  ({len(chunks)} chunks, pages {page_range})")
+        subchunk_summaries: list[dict] = []
+        for c in chunks:
+            prompt = SUBCHUNK_PROMPT.format(
+                title=title,
+                author=author,
+                section_label=ch,
+                section_type=stype,
+                page_range=c.get("page_range", "?"),
+                chunk_id=c["id"],
+                text=c["text"],
+            )
+            summary = llm.generate(prompt, system=SUBCHUNK_SYSTEM)
+            total_llm_calls += 1
+            subchunk_summaries.append({
+                "chunk_id": c["id"],
+                "page_range": c.get("page_range", "?"),
+                "summary": summary,
+            })
+            print(f"    ✓ chunk {c['id']}  (p.{c.get('page_range', '?')})")
+
+        # --- Phase 2: Synthesize section summary from subchunk summaries ---
+        combined_subchunks = "\n\n---\n\n".join(
+            f"[Chunk {sc['chunk_id']}, p.{sc['page_range']}]\n{sc['summary']}"
+            for sc in subchunk_summaries
         )
-        summary = llm.generate(prompt, system=ANALYST_SYSTEM)
-        chapter_insights.append({
-            "chapter": ch,
+        section_prompt = SECTION_PROMPT.format(
+            title=title,
+            author=author,
+            section_label=ch,
+            section_type=stype,
+            page_range=page_range,
+            n_chunks=len(chunks),
+            subchunk_summaries=combined_subchunks,
+            chunk_ids=", ".join(chunk_ids),
+        )
+        section_summary = llm.generate(section_prompt, system=SECTION_SYSTEM)
+        total_llm_calls += 1
+        print(f"    ✓ section synthesis done")
+
+        section_results.append({
+            "section": ch,
             "section_type": stype,
             "page_range": page_range,
             "parent": parent,
-            "summary": summary,
-            "chunk_ids": [c["id"] for c in chunks],
+            "n_chunks": len(chunks),
+            "chunk_ids": chunk_ids,
+            "subchunk_summaries": subchunk_summaries,
+            "section_summary": section_summary,
         })
-        print(f"  ✓ {ch}  (type={stype}, pages={page_range}, chunks={len(chunks)})")
 
-    if not chapter_insights:
+    if not section_results:
         print("\nNo sections matched the filter. Try --mode full.")
-        return {"chapter_insights": [], "book_summary": ""}
+        return {"section_results": [], "book_summary": ""}
 
-    # -- book-level synthesis --
-    all_chapter_text = "\n\n---\n\n".join(
-        f"### {ci['chapter']} ({ci['section_type']}, p.{ci['page_range']})\n{ci['summary']}"
-        for ci in chapter_insights
+    # --- Phase 3: Book-level synthesis ---
+    print(f"\n  ▶ Synthesizing book summary from {len(section_results)} sections …")
+    all_section_text = "\n\n---\n\n".join(
+        f"### {sr['section']} ({sr['section_type']}, p.{sr['page_range']})\n{sr['section_summary']}"
+        for sr in section_results
     )
-    prompt = BOOK_SYNTHESIS_PROMPT.format(
-        title=title, author=author, chapter_summaries=all_chapter_text,
+    book_summary = llm.generate(
+        BOOK_SYNTHESIS_PROMPT.format(
+            title=title, author=author, section_summaries=all_section_text,
+        ),
+        system=BOOK_SYNTHESIS_SYSTEM,
     )
-    book_summary = llm.generate(prompt, system=BOOK_SYNTHESIS_SYSTEM)
+    total_llm_calls += 1
 
-    # -- save results --
+    # --- Save results ---
     results_dir = Path(config.storage.results_directory) / book_id
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    chapter_insights_md = []
-    for ci in chapter_insights:
-        parent_str = f" (in {ci['parent']})" if ci.get("parent") else ""
+    # Per-section insights with full provenance
+    insights_parts: list[str] = []
+    for sr in section_results:
+        parent_str = f" (in {sr['parent']})" if sr.get("parent") else ""
         header = (
-            f"## {ci['chapter']}{parent_str}\n"
-            f"**Type:** {ci['section_type']} | "
-            f"**Pages:** {ci['page_range']} | "
-            f"**Chunks:** {', '.join(ci['chunk_ids'])}\n"
+            f"## {sr['section']}{parent_str}\n"
+            f"**Type:** {sr['section_type']} | "
+            f"**Pages:** {sr['page_range']} | "
+            f"**Chunks:** {sr['n_chunks']}\n"
+            f"**Chunk IDs:** {', '.join(sr['chunk_ids'])}\n"
         )
-        chapter_insights_md.append(header + "\n" + ci["summary"])
+        insights_parts.append(header + "\n" + sr["section_summary"])
+    (results_dir / "chapter_insights.md").write_text("\n\n---\n\n".join(insights_parts))
 
-    (results_dir / "chapter_insights.md").write_text(
-        "\n\n---\n\n".join(chapter_insights_md)
-    )
+    # Subchunk-level summaries for inspection
+    subchunk_data: dict[str, list[dict]] = {}
+    for sr in section_results:
+        subchunk_data[sr["section"]] = sr["subchunk_summaries"]
+    (results_dir / "subchunk_summaries.json").write_text(json.dumps(subchunk_data, indent=2))
+
     (results_dir / "book_summary.md").write_text(book_summary)
     (results_dir / "chunk_map.json").write_text(json.dumps(
-        {ci["chapter"]: ci["chunk_ids"] for ci in chapter_insights}, indent=2
+        {sr["section"]: sr["chunk_ids"] for sr in section_results}, indent=2
     ))
 
-    print(f"\nResults saved to {results_dir}/")
-    return {"chapter_insights": chapter_insights, "book_summary": book_summary}
+    print(f"\n  ✓ Done. {total_llm_calls} LLM calls. Results → {results_dir}/")
+    return {"section_results": section_results, "book_summary": book_summary}

@@ -136,12 +136,16 @@ def _chunk_meta(c: Chunk) -> dict:
         "title": c.title,
         "author": c.author,
         "chapter": c.chapter,
-        "section": c.section,
+        "section_label": c.section_label,
+        "section_type": c.section_type,
+        "parent_part": c.parent_part,
         "source_path": c.source_path,
         "chunk_index": c.chunk_index,
-        "parent_section_id": c.parent_section_id,
+        "section_chunk_index": c.section_chunk_index,
+        "page_start": c.page_start,
+        "page_end": c.page_end,
         "page_range": c.page_range,
-        "section_type": c.section_type,
+        "parent_section_id": c.parent_section_id,
     }
 
 

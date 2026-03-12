@@ -78,13 +78,21 @@ class Chunk:
     book_id: str
     title: str
     author: str
-    chapter: str
-    section: str
+    section_label: str
+    section_type: str
+    parent_part: str
     source_path: str
-    chunk_index: int
-    parent_section_id: str
-    page_range: str
-    section_type: str = "unknown"
+    chunk_index: int          # global index across the whole book
+    section_chunk_index: int  # index within this section
+    page_start: int
+    page_end: int
+    char_start: int = 0
+    char_end: int = 0
+    # kept for backward compat with existing store queries
+    chapter: str = ""
+    section: str = ""
+    parent_section_id: str = ""
+    page_range: str = ""
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -311,6 +319,7 @@ def chunk_pages(
 
         raw_chunks = _split_text(full_text, config)
 
+        section_chunk_idx = 0
         for raw in raw_chunks:
             start_p = _page_at(raw["start"], page_map)
             end_p = _page_at(raw["end"], page_map)
@@ -319,20 +328,29 @@ def chunk_pages(
                 continue
 
             chunks.append(Chunk(
-                chunk_id=f"{book_id}::ch{global_index}",
+                chunk_id=f"{book_id}::s{chapters.index(chapter)}c{section_chunk_idx}",
                 text=text,
                 book_id=book_id,
                 title=title,
                 author=author,
-                chapter=chapter.name,
-                section="",
+                section_label=chapter.name,
+                section_type=chapter.section_type,
+                parent_part=chapter.parent,
                 source_path=source_path,
                 chunk_index=global_index,
+                section_chunk_index=section_chunk_idx,
+                page_start=start_p,
+                page_end=end_p,
+                char_start=raw["start"],
+                char_end=raw["end"],
+                # backward compat fields
+                chapter=chapter.name,
+                section=chapter.section_type,
                 parent_section_id=chapter.parent or chapter.name,
                 page_range=f"{start_p}-{end_p}",
-                section_type=chapter.section_type,
             ))
             global_index += 1
+            section_chunk_idx += 1
 
     return chunks
 
@@ -649,37 +667,131 @@ def _normalise_heading(text: str) -> str:
     return text[:80]
 
 
-def _split_text(text: str, config: ChunkingConfig) -> list[dict]:
-    """Split text into chunks at paragraph boundaries with overlap."""
+_SENTENCE_END = re.compile(r'(?<=[.!?])\s+(?=[A-Z"\'])')
+
+
+def _split_into_segments(text: str) -> list[str]:
+    """Break text into natural segments (paragraphs, then lines, then sentences).
+
+    PDF text often lacks double-newlines between paragraphs, so we try
+    multiple strategies in order of preference.
+    """
+    # Strategy 1: double-newline paragraphs
     paragraphs = re.split(r"\n\s*\n", text)
+    if len(paragraphs) > 1 and max(len(p) for p in paragraphs) < 3000:
+        return [p.strip() for p in paragraphs if p.strip()]
+
+    # Strategy 2: single-newline lines (typical for PDFs)
+    lines = text.split("\n")
+    if len(lines) > 1:
+        # Merge very short lines (likely continuation) into logical segments
+        segments: list[str] = []
+        buf = ""
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                if buf:
+                    segments.append(buf)
+                    buf = ""
+                continue
+            if buf:
+                buf += " " + stripped
+            else:
+                buf = stripped
+            # Flush if the buffer ends with sentence-ending punctuation
+            # and is long enough to be a meaningful paragraph
+            if len(buf) > 150 and re.search(r"[.!?][\"']?\s*$", buf):
+                segments.append(buf)
+                buf = ""
+        if buf:
+            segments.append(buf)
+        if segments:
+            return segments
+
+    # Strategy 3: sentence splitting for giant walls of text
+    sentences = _SENTENCE_END.split(text)
+    if len(sentences) > 1:
+        return [s.strip() for s in sentences if s.strip()]
+
+    # Last resort: return the whole text as one segment
+    return [text.strip()] if text.strip() else []
+
+
+def _split_text(text: str, config: ChunkingConfig) -> list[dict]:
+    """Split text into chunks with overlap. Handles PDF text that may lack
+    paragraph boundaries by using multi-strategy segmentation."""
+    segments = _split_into_segments(text)
+    if not segments:
+        return []
+
+    max_size = getattr(config, "max_chunk_size", config.target_size + 500)
     result: list[dict] = []
     current = ""
     current_start = 0
     offset = 0
 
-    for para in paragraphs:
-        para = para.strip()
-        if not para:
-            offset += 1
-            continue
-
-        if len(current) + len(para) + 1 > config.target_size and current:
+    def _flush():
+        nonlocal current, current_start, offset
+        if not current.strip():
+            return
+        # If chunk exceeds hard cap, force-split at sentence boundaries
+        if len(current) > max_size:
+            _force_split_and_append(current, current_start, offset, result, config, max_size)
+        else:
             result.append({"text": current, "start": current_start, "end": offset})
-            overlap_text = current[-config.overlap:] if config.overlap else ""
-            current_start = offset - len(overlap_text)
-            current = overlap_text
+        overlap_text = current[-config.overlap:] if config.overlap else ""
+        current_start = offset - len(overlap_text)
+        current = overlap_text
+
+    for seg in segments:
+        seg_len = len(seg)
+        if len(current) + seg_len + 1 > config.target_size and current:
+            _flush()
 
         if current:
-            current += "\n\n" + para
+            current += "\n" + seg
         else:
             current_start = offset
-            current = para
-        offset += len(para) + 2
+            current = seg
+        offset += seg_len + 1
 
     if current.strip():
-        result.append({"text": current, "start": current_start, "end": offset})
+        if len(current) > max_size:
+            _force_split_and_append(current, current_start, offset, result, config, max_size)
+        else:
+            result.append({"text": current, "start": current_start, "end": offset})
 
     return result
+
+
+def _force_split_and_append(
+    text: str, start: int, end: int,
+    result: list[dict], config: ChunkingConfig,
+    max_size: int,
+) -> None:
+    """Force-split oversized text into max_size pieces at sentence boundaries,
+    falling back to hard character splits for text without sentences (e.g. indexes)."""
+    sentences = _SENTENCE_END.split(text)
+    if len(sentences) <= 1 and len(text) > max_size:
+        # No sentence boundaries (e.g. index, glossary) — hard split
+        pos = 0
+        while pos < len(text):
+            chunk_end = min(pos + max_size, len(text))
+            result.append({"text": text[pos:chunk_end], "start": start + pos, "end": start + chunk_end})
+            pos = chunk_end - config.overlap if config.overlap else chunk_end
+        return
+
+    buf = ""
+    buf_start = start
+    for sent in sentences:
+        if len(buf) + len(sent) + 1 > max_size and buf:
+            result.append({"text": buf, "start": buf_start, "end": buf_start + len(buf)})
+            overlap = buf[-config.overlap:] if config.overlap else ""
+            buf_start = buf_start + len(buf) - len(overlap)
+            buf = overlap
+        buf = (buf + " " + sent).strip() if buf else sent.strip()
+    if buf.strip():
+        result.append({"text": buf, "start": buf_start, "end": end})
 
 
 def _page_at(char_offset: int, page_map: list[tuple[int, int]]) -> int:

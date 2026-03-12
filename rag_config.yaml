@@ -12,10 +12,10 @@ generation:
   # TODO v2: model routing — different models for different tasks (e.g. fast for chunking, strong for synthesis)
 
 chunking:
-  target_size: 1500                   # Target chunk size in characters
+  target_size: 1500                   # Target chunk size in characters (~375 tokens)
   overlap: 200                        # Overlap between consecutive chunks in characters
   min_chunk_size: 100                 # Discard chunks smaller than this
-  # TODO v2: token-based chunking instead of character-based
+  max_chunk_size: 2000                # Hard cap — force-split any chunk larger than this
 
 retrieval:
   top_k: 10                          # Chunks to retrieve per query

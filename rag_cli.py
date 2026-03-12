@@ -9,8 +9,9 @@ Usage:
     python rag_cli.py compare <book_id> <book_id> [<book_id> ...]
     python rag_cli.py ask "<question>"    [--books <id,id,...>]
     python rag_cli.py inspect books
-    python rag_cli.py inspect chunks <book_id> [--chapter CH]
     python rag_cli.py inspect structure <book_id>
+    python rag_cli.py inspect chunks <book_id> [--chapter CH]
+    python rag_cli.py inspect subchunks <book_id> --chapter <section_name>
     python rag_cli.py inspect summary <book_id>
     python rag_cli.py inspect search "<query>" [--book <book_id>]
     python rag_cli.py inspect-structure <file>  [--debug]
@@ -119,9 +120,14 @@ def cmd_inspect(args):
         inspect_utils.inspect_books(config)
     elif args.what == "chunks":
         if not args.book_id:
-            print("Usage: inspect chunks <book_id> [--chapter CH]")
+            print("Usage: inspect chunks <book_id> [--chapter <section>]")
             return
         inspect_utils.inspect_chunks(args.book_id, config, chapter=args.chapter)
+    elif args.what == "subchunks":
+        if not args.book_id or not args.chapter:
+            print("Usage: inspect subchunks <book_id> --chapter <section_name>")
+            return
+        inspect_utils.inspect_subchunks(args.book_id, args.chapter, config)
     elif args.what == "summary":
         if not args.book_id:
             print("Usage: inspect summary <book_id>")
@@ -135,7 +141,7 @@ def cmd_inspect(args):
     elif args.what == "search":
         query = args.query or args.book_id
         if not query:
-            print("Usage: inspect search \"<query>\" [--book <book_id>]")
+            print('Usage: inspect search "<query>" [--book <book_id>]')
             return
         inspect_utils.inspect_retrieval(query, config, book_id=args.book)
 
@@ -198,7 +204,7 @@ def main():
 
     # --- inspect ---
     p_ins = sub.add_parser("inspect", help="Inspect data and results")
-    p_ins.add_argument("what", choices=["books", "chunks", "summary", "search", "structure"])
+    p_ins.add_argument("what", choices=["books", "chunks", "subchunks", "summary", "search", "structure"])
     p_ins.add_argument("book_id", nargs="?", default=None)
     p_ins.add_argument("--chapter", default=None)
     p_ins.add_argument("--query", default=None)
