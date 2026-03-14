@@ -32,10 +32,18 @@ class ChunkingConfig:
 class SummarizationConfig:
     window_size: int = 8000
     window_overlap: int = 500
-    max_windows_per_section: int = 15
-    quality: str = "default"        # "fast", "default", "thorough"
+    budget_fast: int = 2
+    budget_default: int = 4
+    budget_thorough: int = 99
+    always_include_first: bool = True
+    always_include_last: bool = True
+    selection_strategy: str = "position_keyword"
     verify_by_default: bool = False
     cache_dir: str = "./data/cache"
+
+    def budget_for(self, quality: str) -> int:
+        return {"fast": self.budget_fast, "default": self.budget_default,
+                "thorough": self.budget_thorough}.get(quality, self.budget_default)
 
 
 @dataclass

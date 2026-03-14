@@ -7,10 +7,8 @@ Cache layout:
         book_<hash>.json        — book-level summary
         manifest.json           — maps section names to their cache hashes
 
-Cache keys are SHA-256 hashes of the inputs that determine the output:
-    window:  sorted chunk IDs + model name + prompt version
-    section: sorted window hashes + model name + prompt version
-    book:    sorted section hashes + model name + prompt version
+Cache keys include quality tier so fast/default/thorough don't collide
+at the section and book level (window keys are content-addressed and shared).
 """
 
 from __future__ import annotations
@@ -20,16 +18,17 @@ import json
 from pathlib import Path
 
 
-PROMPT_VERSION = "v2"  # bump when prompts change materially
+PROMPT_VERSION = "v3"  # bumped: selective windowing + improved prompts
 
 
 class SummaryCache:
     """File-backed cache for generated summaries."""
 
-    def __init__(self, cache_dir: str, book_id: str, model: str):
+    def __init__(self, cache_dir: str, book_id: str, model: str, quality: str = "default"):
         self._dir = Path(cache_dir) / book_id
         self._dir.mkdir(parents=True, exist_ok=True)
         self._model = model
+        self._quality = quality
         self._manifest_path = self._dir / "manifest.json"
         self._manifest: dict = self._load_manifest()
         self.hits = 0
@@ -54,13 +53,13 @@ class SummaryCache:
     def section_key(self, section_name: str, window_keys: list[str]) -> str:
         return self._hash_key(
             "section", section_name, ",".join(sorted(window_keys)),
-            self._model, PROMPT_VERSION,
+            self._model, self._quality, PROMPT_VERSION,
         )
 
     def book_key(self, section_keys: list[str]) -> str:
         return self._hash_key(
             "book", ",".join(sorted(section_keys)),
-            self._model, PROMPT_VERSION,
+            self._model, self._quality, PROMPT_VERSION,
         )
 
     # ------------------------------------------------------------------
@@ -76,20 +75,52 @@ class SummaryCache:
     def get_section(self, key: str) -> str | None:
         return self._get("section", key)
 
-    def put_section(self, key: str, summary: str, section_name: str, window_keys: list[str]) -> None:
-        self._put("section", key, {
+    def put_section(self, key: str, summary: str, section_name: str,
+                    window_keys: list[str], meta: dict | None = None) -> None:
+        data = {
             "summary": summary, "section": section_name, "window_keys": window_keys,
-        })
-        self._manifest[section_name] = key
+        }
+        if meta:
+            data["meta"] = meta
+        self._put("section", key, data)
+        self._manifest[section_name] = {"key": key, "quality": self._quality}
         self._save_manifest()
 
     def get_book(self, key: str) -> str | None:
         return self._get("book", key)
 
-    def put_book(self, key: str, summary: str) -> None:
-        self._put("book", key, {"summary": summary})
-        self._manifest["__book__"] = key
+    def put_book(self, key: str, summary: str, meta: dict | None = None) -> None:
+        data = {"summary": summary}
+        if meta:
+            data["meta"] = meta
+        self._put("book", key, data)
+        self._manifest["__book__"] = {"key": key, "quality": self._quality}
         self._save_manifest()
+
+    # ------------------------------------------------------------------
+    # Inspection helpers
+    # ------------------------------------------------------------------
+
+    def list_cached_files(self) -> dict[str, list[str]]:
+        """Return cached file names grouped by type."""
+        result: dict[str, list[str]] = {"window": [], "section": [], "book": []}
+        for f in self._dir.glob("*.json"):
+            if f.name == "manifest.json":
+                continue
+            for prefix in result:
+                if f.name.startswith(prefix + "_"):
+                    result[prefix].append(f.name)
+        return result
+
+    def get_manifest(self) -> dict:
+        return dict(self._manifest)
+
+    def get_raw(self, prefix: str, key: str) -> dict | None:
+        """Read the full cached JSON (not just summary) for inspection."""
+        p = self._path(prefix, key)
+        if p.exists():
+            return json.loads(p.read_text())
+        return None
 
     # ------------------------------------------------------------------
     # Utility
@@ -99,7 +130,6 @@ class SummaryCache:
         return {"hits": self.hits, "misses": self.misses, "total": self.hits + self.misses}
 
     def clear(self) -> None:
-        """Remove all cached artifacts for this book."""
         import shutil
         if self._dir.exists():
             shutil.rmtree(self._dir)

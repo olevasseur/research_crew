@@ -1,35 +1,39 @@
 # RAG Configuration for Book Analysis Pipeline
-# Adjust these settings based on your hardware and model choices.
 
 embedding:
-  model: "nomic-embed-text"           # Ollama embedding model (pull with: ollama pull nomic-embed-text)
+  model: "nomic-embed-text"
   base_url: "http://localhost:11434"
 
 generation:
-  model: "llama3.1"                   # Ollama generation model (without ollama/ prefix)
+  model: "llama3.1"
   base_url: "http://localhost:11434"
 
 chunking:
-  target_size: 1500                   # Target chunk size in characters (~375 tokens) — for retrieval
-  overlap: 200                        # Overlap between retrieval chunks
-  min_chunk_size: 100                 # Discard chunks smaller than this
-  max_chunk_size: 2000                # Hard cap — force-split any chunk larger than this
+  target_size: 1500                   # Retrieval chunk size in characters (~375 tokens)
+  overlap: 200
+  min_chunk_size: 100
+  max_chunk_size: 2000
 
 summarization:
   window_size: 8000                   # Max chars per summary window (~2000 tokens)
-  window_overlap: 500                 # Overlap between adjacent windows in characters
-  max_windows_per_section: 15         # Cap to prevent runaway on very large sections
-  quality: "default"                  # "fast", "default", or "thorough"
-  verify_by_default: false            # Run verification after summarize unless --no-verify
-  cache_dir: "./data/cache"           # Where to store cached summaries
+  window_overlap: 500
+  # Per-quality window budgets (how many windows are actually summarized per section)
+  budget_fast: 2
+  budget_default: 4
+  budget_thorough: 99                 # 99 = effectively all windows
+  always_include_first: true          # First window often has the section's thesis
+  always_include_last: true           # Last window often has conclusions
+  selection_strategy: "position_keyword"  # "position_keyword" or "all"
+  verify_by_default: false
+  cache_dir: "./data/cache"
 
 retrieval:
-  top_k: 10                          # Chunks to retrieve per query
-  similarity_threshold: 0.0          # Minimum similarity (0.0 = no filter)
-  max_context_chunks: 20             # Max chunks to include in a single LLM prompt
+  top_k: 10
+  similarity_threshold: 0.0
+  max_context_chunks: 20
 
 vectorstore:
-  type: "chroma"                     # Vector store backend
+  type: "chroma"
   persist_directory: "./data/vectorstore"
   collection_name: "books"
 

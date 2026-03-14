@@ -27,7 +27,7 @@ def inspect_books(config: RAGConfig) -> None:
         print(f"    Chunks:   {info.get('total_chunks', '?')}")
         sections = info.get("sections", [])
         if sections:
-            types = {}
+            types: dict[str, int] = {}
             for s in sections:
                 t = s.get("section_type", "?")
                 types[t] = types.get(t, 0) + 1
@@ -53,7 +53,6 @@ def inspect_chunks(book_id: str, config: RAGConfig, chapter: str | None = None) 
 
     chunks.sort(key=lambda c: c.get("chunk_index", 0))
 
-    # Summary table first
     current_section = None
     for c in chunks:
         sec = c.get("chapter", c.get("section_label", "?"))
@@ -93,7 +92,6 @@ def inspect_structure(book_id: str, config: RAGConfig) -> None:
         print(f"No section metadata stored for '{book_id}'. Re-ingest to populate.")
         return
 
-    # Also get chunk counts per section
     all_chunks = store.get_chunks_by_book(book_id)
     chunk_counts: dict[str, int] = {}
     for c in all_chunks:
@@ -117,13 +115,8 @@ def inspect_structure(book_id: str, config: RAGConfig) -> None:
         end = s.get("end_page", 0)
         n_chunks = chunk_counts.get(s.get("name", ""), 0)
         print(fmt.format(
-            idx=i,
-            label=label,
-            stype=s.get("section_type", "unknown"),
-            start=start,
-            end=end,
-            count=end - start + 1,
-            chunks=n_chunks,
+            idx=i, label=label, stype=s.get("section_type", "unknown"),
+            start=start, end=end, count=end - start + 1, chunks=n_chunks,
         ))
         conf = s.get("confidence", 0)
         reason = s.get("detection_reason", "")
@@ -155,6 +148,92 @@ def inspect_subchunks(book_id: str, section: str, config: RAGConfig) -> None:
     print(f"\n  Total: {len(chunks)} subchunks")
 
 
+def inspect_windows(book_id: str, config: RAGConfig, section: str | None = None) -> None:
+    """Print summary window info from the last summarization run."""
+    results_dir = Path(config.storage.results_directory) / book_id
+    ws_path = results_dir / "window_summaries.json"
+    meta_path = results_dir / "summary_meta.json"
+
+    if not ws_path.exists():
+        print(f"No window summaries found for '{book_id}'. Run summarize first.")
+        return
+
+    window_data = json.loads(ws_path.read_text())
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+
+    meta_sections = {s["name"]: s for s in meta.get("sections", [])}
+
+    sections_to_show = [section] if section else list(window_data.keys())
+
+    for sec_name in sections_to_show:
+        if sec_name not in window_data:
+            print(f"  Section '{sec_name}' not found in window data.")
+            continue
+
+        windows = window_data[sec_name]
+        sec_meta = meta_sections.get(sec_name, {})
+        total_w = sec_meta.get("windows_total", "?")
+        selected_w = sec_meta.get("windows_selected", len(windows))
+        selected_indices = sec_meta.get("selected_window_indices", [])
+
+        print(f"\n  {sec_name}")
+        print(f"  {'─' * 60}")
+        print(f"  Total windows: {total_w}  |  Selected: {selected_w}  |  Indices: {selected_indices}")
+        print()
+        for ws in windows:
+            wi = ws.get("window", "?")
+            score = ws.get("score", 0)
+            cached = "CACHED" if ws.get("cached") else "COMPUTED"
+            n_chunks = len(ws.get("chunk_ids", []))
+            summary_preview = ws.get("summary", "")[:200].replace("\n", " ")
+            print(f"    Window {wi+1 if isinstance(wi, int) else wi}  "
+                  f"score={score:.2f}  {cached}  ({n_chunks} chunks)")
+            print(f"      {summary_preview}{'…' if len(ws.get('summary', '')) > 200 else ''}")
+            print()
+
+
+def inspect_summary_meta(book_id: str, config: RAGConfig) -> None:
+    """Print summary metadata from the last summarization run."""
+    results_dir = Path(config.storage.results_directory) / book_id
+    meta_path = results_dir / "summary_meta.json"
+    if not meta_path.exists():
+        print(f"No summary metadata for '{book_id}'. Run summarize first.")
+        return
+
+    meta = json.loads(meta_path.read_text())
+    print(f"\nSummary metadata for: {book_id}")
+    print(f"{'=' * 60}")
+    print(f"  Quality:       {meta.get('quality', '?')}")
+    print(f"  Mode:          {meta.get('mode', '?')}")
+    print(f"  Budget:        {meta.get('budget_per_section', '?')} windows/section")
+    print(f"  Strategy:      {meta.get('strategy', '?')}")
+    print(f"  Model:         {meta.get('model', '?')}")
+    print(f"  Timestamp:     {meta.get('timestamp', '?')}")
+    print(f"  LLM calls:     {meta.get('total_llm_calls', '?')}")
+    print(f"  Cache hits:    {meta.get('cache_hits', '?')}")
+    print(f"  Cache misses:  {meta.get('cache_misses', '?')}")
+
+    sections = meta.get("sections", [])
+    if sections:
+        print(f"\n  Per-section breakdown:")
+        total_selected = 0
+        total_total = 0
+        for s in sections:
+            sel = s.get("windows_selected", "?")
+            tot = s.get("windows_total", "?")
+            if isinstance(sel, int):
+                total_selected += sel
+            if isinstance(tot, int):
+                total_total += tot
+            indices = s.get("selected_window_indices", [])
+            print(f"    {s.get('name', '?'):<45s}  "
+                  f"{sel}/{tot} windows  "
+                  f"chunks={s.get('chunks', '?')}")
+        if isinstance(total_selected, int) and isinstance(total_total, int):
+            print(f"\n  Totals: {total_selected}/{total_total} windows summarized across {len(sections)} sections")
+    print()
+
+
 def inspect_summary(book_id: str, config: RAGConfig) -> None:
     """Print a book's summary and related files if they exist."""
     results_dir = Path(config.storage.results_directory) / book_id
@@ -167,16 +246,6 @@ def inspect_summary(book_id: str, config: RAGConfig) -> None:
             print(fpath.read_text())
         else:
             print(f"  {name}: not yet generated")
-
-    # Show subchunk summary counts if available
-    sc_path = results_dir / "subchunk_summaries.json"
-    if sc_path.exists():
-        data = json.loads(sc_path.read_text())
-        print(f"\n{'=' * 60}")
-        print(f"  Subchunk summaries")
-        print(f"{'=' * 60}")
-        for section, summaries in data.items():
-            print(f"  {section}: {len(summaries)} subchunk summaries")
 
 
 def inspect_retrieval(query: str, config: RAGConfig, book_id: str | None = None) -> None:

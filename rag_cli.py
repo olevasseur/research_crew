@@ -4,7 +4,7 @@
 Usage:
     python rag_cli.py ingest <file>       [--title T] [--author A] [--book-id ID]
     python rag_cli.py ingest-folder <dir>
-    python rag_cli.py summarize <book_id> [--mode MODE] [--quality Q] [--force] [--verify] [--no-verify]
+    python rag_cli.py summarize <book_id> [--mode MODE] [--quality Q] [--section S] [--force] [--verify] [--no-verify]
     python rag_cli.py verify <book_id>
     python rag_cli.py compare <book_id> <book_id> [<book_id> ...]
     python rag_cli.py ask "<question>"    [--books <id,id,...>]
@@ -12,7 +12,9 @@ Usage:
     python rag_cli.py inspect structure <book_id>
     python rag_cli.py inspect chunks <book_id> [--chapter CH]
     python rag_cli.py inspect subchunks <book_id> --chapter <section_name>
+    python rag_cli.py inspect windows <book_id> [--chapter <section_name>]
     python rag_cli.py inspect summary <book_id>
+    python rag_cli.py inspect summary-meta <book_id>
     python rag_cli.py inspect search "<query>" [--book <book_id>]
     python rag_cli.py inspect-structure <file>  [--debug]
 """
@@ -29,11 +31,8 @@ def cmd_ingest(args):
     from rag.ingest import ingest_book
     config = load_config(args.config)
     ingest_book(
-        args.file,
-        config,
-        title=args.title,
-        author=args.author,
-        book_id=args.book_id,
+        args.file, config,
+        title=args.title, author=args.author, book_id=args.book_id,
     )
 
 
@@ -56,7 +55,6 @@ def cmd_summarize(args):
     include_types = args.include.split(",") if args.include else None
     exclude_types = args.exclude.split(",") if args.exclude else None
 
-    # Resolve verify: --verify → True, --no-verify → False, neither → None (use config)
     verify = None
     if args.verify:
         verify = True
@@ -64,15 +62,15 @@ def cmd_summarize(args):
         verify = False
 
     quality = args.quality
-    print(f"Analysing '{args.book_id}' (mode={mode}, quality={quality}, force={args.force}) …\n")
+    section = args.section
+    print(f"Analysing '{args.book_id}' (mode={mode}, quality={quality}, "
+          f"section={section or 'all'}, force={args.force}) …\n")
     analyse_book(
         args.book_id, config,
-        mode=mode,
-        quality=quality,
-        include_types=include_types,
-        exclude_types=exclude_types,
-        force=args.force,
-        verify=verify,
+        mode=mode, quality=quality,
+        section_filter=section,
+        include_types=include_types, exclude_types=exclude_types,
+        force=args.force, verify=verify,
     )
 
 
@@ -135,11 +133,21 @@ def cmd_inspect(args):
             print("Usage: inspect subchunks <book_id> --chapter <section_name>")
             return
         inspect_utils.inspect_subchunks(args.book_id, args.chapter, config)
+    elif args.what == "windows":
+        if not args.book_id:
+            print("Usage: inspect windows <book_id> [--chapter <section_name>]")
+            return
+        inspect_utils.inspect_windows(args.book_id, config, section=args.chapter)
     elif args.what == "summary":
         if not args.book_id:
             print("Usage: inspect summary <book_id>")
             return
         inspect_utils.inspect_summary(args.book_id, config)
+    elif args.what == "summary-meta":
+        if not args.book_id:
+            print("Usage: inspect summary-meta <book_id>")
+            return
+        inspect_utils.inspect_summary_meta(args.book_id, config)
     elif args.what == "structure":
         if not args.book_id:
             print("Usage: inspect structure <book_id>")
@@ -179,10 +187,12 @@ def main():
     p_sum.add_argument("book_id")
     p_sum.add_argument("--mode", default="default",
                        choices=["default", "body-only", "chapter-only", "full", "back-matter"],
-                       help="Which sections to include (default: intro+chapters+conclusion)")
+                       help="Which sections to include")
     p_sum.add_argument("--quality", default="default",
                        choices=["fast", "default", "thorough"],
-                       help="Summarization quality: fast (fewer windows), default, thorough (more windows)")
+                       help="fast=2/section, default=4/section, thorough=all windows")
+    p_sum.add_argument("--section", default=None,
+                       help="Summarize only this one section (exact name, e.g. 'Chapter 3: ...')")
     p_sum.add_argument("--include", default=None,
                        help="Extra section_types to include (comma-separated)")
     p_sum.add_argument("--exclude", default=None,
@@ -219,7 +229,9 @@ def main():
 
     # --- inspect ---
     p_ins = sub.add_parser("inspect", help="Inspect data and results")
-    p_ins.add_argument("what", choices=["books", "chunks", "subchunks", "summary", "search", "structure"])
+    p_ins.add_argument("what", choices=[
+        "books", "chunks", "subchunks", "windows", "summary", "summary-meta", "search", "structure",
+    ])
     p_ins.add_argument("book_id", nargs="?", default=None)
     p_ins.add_argument("--chapter", default=None)
     p_ins.add_argument("--query", default=None)
