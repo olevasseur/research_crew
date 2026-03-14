@@ -29,6 +29,16 @@ class ChunkingConfig:
 
 
 @dataclass
+class SummarizationConfig:
+    window_size: int = 8000
+    window_overlap: int = 500
+    max_windows_per_section: int = 15
+    quality: str = "default"        # "fast", "default", "thorough"
+    verify_by_default: bool = False
+    cache_dir: str = "./data/cache"
+
+
+@dataclass
 class RetrievalConfig:
     top_k: int = 10
     similarity_threshold: float = 0.0
@@ -52,6 +62,7 @@ class RAGConfig:
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     generation: GenerationConfig = field(default_factory=GenerationConfig)
     chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
+    summarization: SummarizationConfig = field(default_factory=SummarizationConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     vectorstore: VectorStoreConfig = field(default_factory=VectorStoreConfig)
     storage: StorageConfig = field(default_factory=StorageConfig)
@@ -71,6 +82,7 @@ def load_config(path: str = "rag_config.yaml") -> RAGConfig:
         "embedding": EmbeddingConfig,
         "generation": GenerationConfig,
         "chunking": ChunkingConfig,
+        "summarization": SummarizationConfig,
         "retrieval": RetrievalConfig,
         "vectorstore": VectorStoreConfig,
         "storage": StorageConfig,

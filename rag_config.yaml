@@ -4,30 +4,34 @@
 embedding:
   model: "nomic-embed-text"           # Ollama embedding model (pull with: ollama pull nomic-embed-text)
   base_url: "http://localhost:11434"
-  # TODO v2: support OpenAI-compatible embedding APIs
 
 generation:
   model: "llama3.1"                   # Ollama generation model (without ollama/ prefix)
   base_url: "http://localhost:11434"
-  # TODO v2: model routing — different models for different tasks (e.g. fast for chunking, strong for synthesis)
 
 chunking:
-  target_size: 1500                   # Target chunk size in characters (~375 tokens)
-  overlap: 200                        # Overlap between consecutive chunks in characters
+  target_size: 1500                   # Target chunk size in characters (~375 tokens) — for retrieval
+  overlap: 200                        # Overlap between retrieval chunks
   min_chunk_size: 100                 # Discard chunks smaller than this
   max_chunk_size: 2000                # Hard cap — force-split any chunk larger than this
+
+summarization:
+  window_size: 8000                   # Max chars per summary window (~2000 tokens)
+  window_overlap: 500                 # Overlap between adjacent windows in characters
+  max_windows_per_section: 15         # Cap to prevent runaway on very large sections
+  quality: "default"                  # "fast", "default", or "thorough"
+  verify_by_default: false            # Run verification after summarize unless --no-verify
+  cache_dir: "./data/cache"           # Where to store cached summaries
 
 retrieval:
   top_k: 10                          # Chunks to retrieve per query
   similarity_threshold: 0.0          # Minimum similarity (0.0 = no filter)
   max_context_chunks: 20             # Max chunks to include in a single LLM prompt
-  # TODO v2: reranking step after initial retrieval
 
 vectorstore:
   type: "chroma"                     # Vector store backend
   persist_directory: "./data/vectorstore"
   collection_name: "books"
-  # TODO v2: support Qdrant for better filtering and scalability
 
 storage:
   results_directory: "./data/results"

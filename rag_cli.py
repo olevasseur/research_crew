@@ -4,7 +4,7 @@
 Usage:
     python rag_cli.py ingest <file>       [--title T] [--author A] [--book-id ID]
     python rag_cli.py ingest-folder <dir>
-    python rag_cli.py summarize <book_id> [--mode MODE] [--verify]
+    python rag_cli.py summarize <book_id> [--mode MODE] [--quality Q] [--force] [--verify] [--no-verify]
     python rag_cli.py verify <book_id>
     python rag_cli.py compare <book_id> <book_id> [<book_id> ...]
     python rag_cli.py ask "<question>"    [--books <id,id,...>]
@@ -46,7 +46,6 @@ def cmd_ingest_folder(args):
 
 def cmd_summarize(args):
     from rag.analysis import analyse_book, SUMMARIZE_MODES
-    from rag.critic import verify_book_summary
     config = load_config(args.config)
 
     mode = args.mode
@@ -57,16 +56,24 @@ def cmd_summarize(args):
     include_types = args.include.split(",") if args.include else None
     exclude_types = args.exclude.split(",") if args.exclude else None
 
-    print(f"Analysing '{args.book_id}' (mode={mode}) …\n")
+    # Resolve verify: --verify → True, --no-verify → False, neither → None (use config)
+    verify = None
+    if args.verify:
+        verify = True
+    elif args.no_verify:
+        verify = False
+
+    quality = args.quality
+    print(f"Analysing '{args.book_id}' (mode={mode}, quality={quality}, force={args.force}) …\n")
     analyse_book(
         args.book_id, config,
         mode=mode,
+        quality=quality,
         include_types=include_types,
         exclude_types=exclude_types,
+        force=args.force,
+        verify=verify,
     )
-    if args.verify:
-        print("\nRunning verification …")
-        verify_book_summary(args.book_id, config)
 
 
 def cmd_verify(args):
@@ -173,11 +180,19 @@ def main():
     p_sum.add_argument("--mode", default="default",
                        choices=["default", "body-only", "chapter-only", "full", "back-matter"],
                        help="Which sections to include (default: intro+chapters+conclusion)")
+    p_sum.add_argument("--quality", default="default",
+                       choices=["fast", "default", "thorough"],
+                       help="Summarization quality: fast (fewer windows), default, thorough (more windows)")
     p_sum.add_argument("--include", default=None,
                        help="Extra section_types to include (comma-separated)")
     p_sum.add_argument("--exclude", default=None,
                        help="Section_types to exclude (comma-separated)")
-    p_sum.add_argument("--verify", action="store_true", help="Run critic after summarising")
+    p_sum.add_argument("--force", action="store_true",
+                       help="Clear cache and recompute everything")
+    p_sum.add_argument("--verify", action="store_true",
+                       help="Run verification after summarising")
+    p_sum.add_argument("--no-verify", action="store_true",
+                       help="Skip verification even if config enables it")
     p_sum.set_defaults(func=cmd_summarize)
 
     # --- verify ---
