@@ -175,21 +175,67 @@ def inspect_windows(book_id: str, config: RAGConfig, section: str | None = None)
         total_w = sec_meta.get("windows_total", "?")
         selected_w = sec_meta.get("windows_selected", len(windows))
         selected_indices = sec_meta.get("selected_window_indices", [])
+        selected_labels = sec_meta.get("selected_labels", [])
 
         print(f"\n  {sec_name}")
         print(f"  {'─' * 60}")
         print(f"  Total windows: {total_w}  |  Selected: {selected_w}  |  Indices: {selected_indices}")
         print()
-        for ws in windows:
+        for j, ws in enumerate(windows):
             wi = ws.get("window", "?")
             score = ws.get("score", 0)
+            labels = ws.get("labels", [])
             cached = "CACHED" if ws.get("cached") else "COMPUTED"
             n_chunks = len(ws.get("chunk_ids", []))
             summary_preview = ws.get("summary", "")[:200].replace("\n", " ")
             print(f"    Window {wi+1 if isinstance(wi, int) else wi}  "
-                  f"score={score:.2f}  {cached}  ({n_chunks} chunks)")
+                  f"score={score:.3f}  [{'+'.join(labels) or 'general'}]  "
+                  f"{cached}  ({n_chunks} chunks)")
             print(f"      {summary_preview}{'…' if len(ws.get('summary', '')) > 200 else ''}")
             print()
+
+
+def inspect_selection(book_id: str, config: RAGConfig, section: str | None = None) -> None:
+    """Print detailed window selection info: all candidates, scores, reasons."""
+    results_dir = Path(config.storage.results_directory) / book_id
+    sel_path = results_dir / "selection_detail.json"
+
+    if not sel_path.exists():
+        print(f"No selection detail for '{book_id}'. Run summarize first.")
+        return
+
+    sel_data = json.loads(sel_path.read_text())
+    sections_to_show = [section] if section else list(sel_data.keys())
+
+    for sec_name in sections_to_show:
+        if sec_name not in sel_data:
+            print(f"  Section '{sec_name}' not found in selection data.")
+            continue
+
+        windows = sel_data[sec_name]
+        n_selected = sum(1 for w in windows if w.get("selected"))
+        print(f"\n  {sec_name}  ({n_selected}/{len(windows)} selected)")
+        print(f"  {'─' * 80}")
+        print(f"  {'W#':>3s}  {'Sel':>3s}  {'Composite':>9s}  {'Content':>7s}  "
+              f"{'Density':>7s}  {'Specific':>8s}  {'TitleOv':>7s}  {'Pos':>5s}  "
+              f"{'Labels':<20s}  Reason")
+        print(f"  {'─' * 80}")
+
+        for w in windows:
+            idx = w.get("index", "?")
+            sel = "YES" if w.get("selected") else " - "
+            scores = w.get("scores", {})
+            labels = "+".join(w.get("content_labels", [])) or "general"
+            reason = w.get("reason", "")
+            print(f"  {idx+1 if isinstance(idx, int) else idx:>3}  {sel:>3s}  "
+                  f"{scores.get('composite', 0):>9.4f}  "
+                  f"{scores.get('content_type', 0):>7.3f}  "
+                  f"{scores.get('concept_density', 0):>7.3f}  "
+                  f"{scores.get('specificity', 0):>8.3f}  "
+                  f"{scores.get('title_overlap', 0):>7.3f}  "
+                  f"{scores.get('position', 0):>5.2f}  "
+                  f"{labels:<20s}  {reason}")
+        print()
 
 
 def inspect_summary_meta(book_id: str, config: RAGConfig) -> None:
@@ -207,6 +253,7 @@ def inspect_summary_meta(book_id: str, config: RAGConfig) -> None:
     print(f"  Mode:          {meta.get('mode', '?')}")
     print(f"  Budget:        {meta.get('budget_per_section', '?')} windows/section")
     print(f"  Strategy:      {meta.get('strategy', '?')}")
+    print(f"  MMR lambda:    {meta.get('mmr_lambda', '?')}")
     print(f"  Model:         {meta.get('model', '?')}")
     print(f"  Timestamp:     {meta.get('timestamp', '?')}")
     print(f"  LLM calls:     {meta.get('total_llm_calls', '?')}")
@@ -226,11 +273,17 @@ def inspect_summary_meta(book_id: str, config: RAGConfig) -> None:
             if isinstance(tot, int):
                 total_total += tot
             indices = s.get("selected_window_indices", [])
-            print(f"    {s.get('name', '?'):<45s}  "
-                  f"{sel}/{tot} windows  "
-                  f"chunks={s.get('chunks', '?')}")
+            labels = s.get("selected_labels", [])
+            labels_str = ", ".join(
+                "+".join(l) if l else "gen" for l in labels
+            ) if labels else ""
+            print(f"    {s.get('name', '?'):<40s}  "
+                  f"{sel}/{tot} windows  chunks={s.get('chunks', '?')}")
+            if labels_str:
+                print(f"      labels: {labels_str}")
         if isinstance(total_selected, int) and isinstance(total_total, int):
-            print(f"\n  Totals: {total_selected}/{total_total} windows summarized across {len(sections)} sections")
+            print(f"\n  Totals: {total_selected}/{total_total} windows summarized "
+                  f"across {len(sections)} sections")
     print()
 
 

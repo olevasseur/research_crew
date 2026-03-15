@@ -4,7 +4,8 @@
 Usage:
     python rag_cli.py ingest <file>       [--title T] [--author A] [--book-id ID]
     python rag_cli.py ingest-folder <dir>
-    python rag_cli.py summarize <book_id> [--mode MODE] [--quality Q] [--section S] [--force] [--verify] [--no-verify]
+    python rag_cli.py summarize <book_id> [--mode M] [--quality Q] [--section S] [--force] [--verify] [--no-verify]
+    python rag_cli.py evaluate <book_id>  [--section S]
     python rag_cli.py verify <book_id>
     python rag_cli.py compare <book_id> <book_id> [<book_id> ...]
     python rag_cli.py ask "<question>"    [--books <id,id,...>]
@@ -13,6 +14,7 @@ Usage:
     python rag_cli.py inspect chunks <book_id> [--chapter CH]
     python rag_cli.py inspect subchunks <book_id> --chapter <section_name>
     python rag_cli.py inspect windows <book_id> [--chapter <section_name>]
+    python rag_cli.py inspect selection <book_id> [--chapter <section_name>]
     python rag_cli.py inspect summary <book_id>
     python rag_cli.py inspect summary-meta <book_id>
     python rag_cli.py inspect search "<query>" [--book <book_id>]
@@ -72,6 +74,20 @@ def cmd_summarize(args):
         include_types=include_types, exclude_types=exclude_types,
         force=args.force, verify=verify,
     )
+
+
+def cmd_evaluate(args):
+    from rag.evaluate import evaluate_section, evaluate_book
+    config = load_config(args.config)
+
+    if args.section:
+        print(f"Evaluating section '{args.section}' of '{args.book_id}' …\n")
+        result = evaluate_section(args.book_id, args.section, config)
+    else:
+        print(f"Evaluating book summary for '{args.book_id}' …\n")
+        result = evaluate_book(args.book_id, config)
+
+    print(result)
 
 
 def cmd_verify(args):
@@ -138,6 +154,11 @@ def cmd_inspect(args):
             print("Usage: inspect windows <book_id> [--chapter <section_name>]")
             return
         inspect_utils.inspect_windows(args.book_id, config, section=args.chapter)
+    elif args.what == "selection":
+        if not args.book_id:
+            print("Usage: inspect selection <book_id> [--chapter <section_name>]")
+            return
+        inspect_utils.inspect_selection(args.book_id, config, section=args.chapter)
     elif args.what == "summary":
         if not args.book_id:
             print("Usage: inspect summary <book_id>")
@@ -190,9 +211,9 @@ def main():
                        help="Which sections to include")
     p_sum.add_argument("--quality", default="default",
                        choices=["fast", "default", "thorough"],
-                       help="fast=2/section, default=4/section, thorough=all windows")
+                       help="fast=3/section, default=6/section, thorough=all windows")
     p_sum.add_argument("--section", default=None,
-                       help="Summarize only this one section (exact name, e.g. 'Chapter 3: ...')")
+                       help="Summarize only this one section (exact name)")
     p_sum.add_argument("--include", default=None,
                        help="Extra section_types to include (comma-separated)")
     p_sum.add_argument("--exclude", default=None,
@@ -205,8 +226,15 @@ def main():
                        help="Skip verification even if config enables it")
     p_sum.set_defaults(func=cmd_summarize)
 
+    # --- evaluate ---
+    p_eval = sub.add_parser("evaluate", help="Evaluate summary quality against sources")
+    p_eval.add_argument("book_id")
+    p_eval.add_argument("--section", default=None,
+                        help="Evaluate one section (exact name). Omit for book-level evaluation.")
+    p_eval.set_defaults(func=cmd_evaluate)
+
     # --- verify ---
-    p_ver = sub.add_parser("verify", help="Verify a book summary against sources")
+    p_ver = sub.add_parser("verify", help="Verify a book summary against source chunks")
     p_ver.add_argument("book_id")
     p_ver.set_defaults(func=cmd_verify)
 
@@ -230,7 +258,8 @@ def main():
     # --- inspect ---
     p_ins = sub.add_parser("inspect", help="Inspect data and results")
     p_ins.add_argument("what", choices=[
-        "books", "chunks", "subchunks", "windows", "summary", "summary-meta", "search", "structure",
+        "books", "chunks", "subchunks", "windows", "selection",
+        "summary", "summary-meta", "search", "structure",
     ])
     p_ins.add_argument("book_id", nargs="?", default=None)
     p_ins.add_argument("--chapter", default=None)

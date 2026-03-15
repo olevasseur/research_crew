@@ -9,21 +9,21 @@ generation:
   base_url: "http://localhost:11434"
 
 chunking:
-  target_size: 1500                   # Retrieval chunk size in characters (~375 tokens)
+  target_size: 1500
   overlap: 200
   min_chunk_size: 100
   max_chunk_size: 2000
 
 summarization:
-  window_size: 8000                   # Max chars per summary window (~2000 tokens)
+  window_size: 8000
   window_overlap: 500
-  # Per-quality window budgets (how many windows are actually summarized per section)
-  budget_fast: 2
-  budget_default: 4
-  budget_thorough: 99                 # 99 = effectively all windows
-  always_include_first: true          # First window often has the section's thesis
-  always_include_last: true           # Last window often has conclusions
-  selection_strategy: "position_keyword"  # "position_keyword" or "all"
+  budget_fast: 3
+  budget_default: 6
+  budget_thorough: 99
+  always_include_first: true
+  always_include_last: true
+  selection_strategy: "content_diversity"   # "content_diversity" or "all"
+  mmr_lambda: 0.7                           # balance relevance vs diversity (0=pure diversity, 1=pure relevance)
   verify_by_default: false
   cache_dir: "./data/cache"
 

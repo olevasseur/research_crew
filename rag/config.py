@@ -32,12 +32,13 @@ class ChunkingConfig:
 class SummarizationConfig:
     window_size: int = 8000
     window_overlap: int = 500
-    budget_fast: int = 2
-    budget_default: int = 4
+    budget_fast: int = 3
+    budget_default: int = 6
     budget_thorough: int = 99
     always_include_first: bool = True
     always_include_last: bool = True
-    selection_strategy: str = "position_keyword"
+    selection_strategy: str = "content_diversity"
+    mmr_lambda: float = 0.7
     verify_by_default: bool = False
     cache_dir: str = "./data/cache"
 

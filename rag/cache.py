@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 
 
-PROMPT_VERSION = "v3"  # bumped: selective windowing + improved prompts
+PROMPT_VERSION = "v4"  # bumped: content_diversity selection + improved prompts
 
 
 class SummaryCache:
@@ -102,7 +102,6 @@ class SummaryCache:
     # ------------------------------------------------------------------
 
     def list_cached_files(self) -> dict[str, list[str]]:
-        """Return cached file names grouped by type."""
         result: dict[str, list[str]] = {"window": [], "section": [], "book": []}
         for f in self._dir.glob("*.json"):
             if f.name == "manifest.json":
@@ -116,7 +115,6 @@ class SummaryCache:
         return dict(self._manifest)
 
     def get_raw(self, prefix: str, key: str) -> dict | None:
-        """Read the full cached JSON (not just summary) for inspection."""
         p = self._path(prefix, key)
         if p.exists():
             return json.loads(p.read_text())
