@@ -7,6 +7,7 @@ Usage:
     python rag_cli.py summarize <book_id> [--mode M] [--quality Q] [--section S] [--force] [--verify] [--no-verify]
     python rag_cli.py evaluate <book_id>  [--section S]
     python rag_cli.py trace <book_id> --idea "<query>" [--show both|sections|windows] [--limit N]
+    python rag_cli.py explore <book_id> --section "<section>" [--show all|summary|windows]
     python rag_cli.py verify <book_id>
     python rag_cli.py compare <book_id> <book_id> [<book_id> ...]
     python rag_cli.py ask "<question>"    [--books <id,id,...>]
@@ -97,6 +98,15 @@ def cmd_trace(args):
     trace_idea(
         args.book_id, args.idea, config,
         limit=args.limit, show=args.show,
+    )
+
+
+def cmd_explore(args):
+    from rag.navigation import explore_section
+    config = load_config(args.config)
+    explore_section(
+        args.book_id, args.section, config,
+        show=args.show,
     )
 
 
@@ -242,6 +252,14 @@ def main():
     p_eval.add_argument("--section", default=None,
                         help="Evaluate one section (exact name). Omit for book-level evaluation.")
     p_eval.set_defaults(func=cmd_evaluate)
+
+    # --- explore ---
+    p_expl = sub.add_parser("explore", help="Explore one section in structured detail")
+    p_expl.add_argument("book_id")
+    p_expl.add_argument("--section", required=True, help="Section name to explore")
+    p_expl.add_argument("--show", default="all", choices=["all", "summary", "windows"],
+                        help="Show summary subsections, window previews, or both")
+    p_expl.set_defaults(func=cmd_explore)
 
     # --- trace ---
     p_trace = sub.add_parser("trace", help="Trace an idea through a book's summaries")
