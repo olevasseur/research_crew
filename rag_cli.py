@@ -6,6 +6,7 @@ Usage:
     python rag_cli.py ingest-folder <dir>
     python rag_cli.py summarize <book_id> [--mode M] [--quality Q] [--section S] [--force] [--verify] [--no-verify]
     python rag_cli.py evaluate <book_id>  [--section S]
+    python rag_cli.py trace <book_id> --idea "<query>" [--show both|sections|windows] [--limit N]
     python rag_cli.py verify <book_id>
     python rag_cli.py compare <book_id> <book_id> [<book_id> ...]
     python rag_cli.py ask "<question>"    [--books <id,id,...>]
@@ -88,6 +89,15 @@ def cmd_evaluate(args):
         result = evaluate_book(args.book_id, config)
 
     print(result)
+
+
+def cmd_trace(args):
+    from rag.navigation import trace_idea
+    config = load_config(args.config)
+    trace_idea(
+        args.book_id, args.idea, config,
+        limit=args.limit, show=args.show,
+    )
 
 
 def cmd_verify(args):
@@ -232,6 +242,16 @@ def main():
     p_eval.add_argument("--section", default=None,
                         help="Evaluate one section (exact name). Omit for book-level evaluation.")
     p_eval.set_defaults(func=cmd_evaluate)
+
+    # --- trace ---
+    p_trace = sub.add_parser("trace", help="Trace an idea through a book's summaries")
+    p_trace.add_argument("book_id")
+    p_trace.add_argument("--idea", required=True, help="Idea or concept to trace")
+    p_trace.add_argument("--show", default="both", choices=["both", "sections", "windows"],
+                         help="Show section summaries, window summaries, or both")
+    p_trace.add_argument("--limit", type=int, default=20,
+                         help="Max number of matching sections to display")
+    p_trace.set_defaults(func=cmd_trace)
 
     # --- verify ---
     p_ver = sub.add_parser("verify", help="Verify a book summary against source chunks")
