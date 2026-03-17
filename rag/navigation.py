@@ -43,7 +43,10 @@ def _snippet_around(text: str, variant: str, context_chars: int = 120) -> str | 
         return None
     start = max(0, pos - context_chars)
     end = min(len(text), pos + len(variant) + context_chars)
-    snippet = text[start:end].replace("\n", " ").strip()
+    # Convert heading lines (## / ###) to [Label] before collapsing newlines so
+    # the label is clearly separated from the body text in the flattened snippet.
+    raw = re.sub(r"#{2,}\s+(.+)", r"[\1]", text[start:end])
+    snippet = raw.replace("\n", " ").strip()
     prefix = "..." if start > 0 else ""
     suffix = "..." if end < len(text) else ""
     return f"{prefix}{snippet}{suffix}"
@@ -87,8 +90,11 @@ def trace_idea(
         sec_hits = _count_matches(sec_text, variants)
         sec_snippet = None
         if sec_hits > 0:
+            # Search for snippets in the content portion only (skip the ## heading
+            # and **Type:** metadata lines at the top of each section block).
+            sec_content = _section_content(sec_text)
             for v in variants:
-                sec_snippet = _snippet_around(sec_text, v)
+                sec_snippet = _snippet_around(sec_content, v)
                 if sec_snippet:
                     break
 
@@ -148,7 +154,6 @@ def trace_idea(
         print("Try a different phrasing, or check with: inspect search")
         return
 
-    displayed = min(len(matches), limit)
     for rank, m in enumerate(matches[:limit], 1):
         source_str = " + ".join(m["match_source"])
         print(f"\n  #{rank}  {m['section']}")
@@ -169,6 +174,25 @@ def trace_idea(
         print(f"\n  ... {len(matches) - limit} more matching sections (use --limit to show more)")
 
     print()
+
+
+def _section_content(sec_text: str) -> str:
+    """Return sec_text with the ## heading and inline metadata lines stripped.
+
+    The first few lines of each section block are: the ``## Title`` heading,
+    the ``**Type:** … | **Pages:** …`` metadata line, and optionally a
+    ``**Selected:** …`` label line.  These are bookkeeping data, not summary
+    prose, so we skip them when generating search snippets.
+    """
+    lines = sec_text.split("\n")
+    i = 0
+    while i < len(lines) and (
+        lines[i].startswith("##")
+        or lines[i].startswith("**Type:")
+        or lines[i].startswith("**Selected:")
+    ):
+        i += 1
+    return "\n".join(lines[i:]).strip()
 
 
 def _parse_section_summaries(insights_text: str) -> list[tuple[str, str]]:
@@ -217,12 +241,17 @@ def _extract_subsections(summary_text: str) -> dict[str, str]:
 
 
 def _compact_preview(text: str, max_lines: int = 6, max_chars: int = 400) -> str:
-    """Trim text to a compact preview."""
+    """Trim text to a compact preview.
+
+    Always includes at least the first line even if it exceeds max_chars alone.
+    """
     lines = text.split("\n")
     out_lines: list[str] = []
     total = 0
     for line in lines:
-        if total + len(line) > max_chars or len(out_lines) >= max_lines:
+        # Check budget only after at least one line has been added,
+        # so a single long paragraph never produces an empty preview.
+        if out_lines and (total >= max_chars or len(out_lines) >= max_lines):
             break
         out_lines.append(line)
         total += len(line)
@@ -313,7 +342,13 @@ def explore_section(
 
             if label == "Source":
                 print(f"\n  [{label}]")
-                print(indent(body, "    "))
+                # Abbreviate long chunk-ID lists (already shown as Chunks count in header).
+                display = re.sub(
+                    r"\| Chunk IDs: .+",
+                    lambda m: f"| ({m.group(0).count(',') + 1} chunks)",
+                    body,
+                )
+                print(indent(display, "    "))
                 continue
 
             print(f"\n  [{label}]")
