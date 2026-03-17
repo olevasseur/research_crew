@@ -21,12 +21,17 @@ Usage:
     python rag_cli.py inspect summary-meta <book_id>
     python rag_cli.py inspect search "<query>" [--book <book_id>]
     python rag_cli.py inspect-structure <file>  [--debug]
+    python rag_cli.py --version
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+
+if {"-V", "--version"} & set(sys.argv[1:]):
+    print("rag-pipeline 1.0.0")
+    sys.exit(0)
 
 from rag.config import load_config
 
@@ -207,6 +212,7 @@ def main():
         description="RAG book analysis pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    parser.add_argument("-V", "--version", action="version", version="rag-pipeline 1.0.0")
     parser.add_argument("--config", default="rag_config.yaml", help="Config file path")
     sub = parser.add_subparsers(dest="command")
 

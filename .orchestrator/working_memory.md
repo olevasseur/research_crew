@@ -41,3 +41,30 @@ Test book throughout: `digital-minimalism`. Summary + evaluations exist for it.
 - ~~Test `trace` and `explore` commands end-to-end.~~ Done in iter 11.
 - Add a second book to test multi-book `compare` and `ask` commands.
 - Or: improve summary prompts based on eval feedback (would require PROMPT_VERSION bump).
+## Iteration 0 · 2026-03-17 02:37:54 UTC
+
+**Progress:** Add a minimal top-level argparse version flag to rag_cli.py and update its module docstring usage example, touching only that file.
+
+**Decisions:** approved — executor exit 0. Validation: `python rag_cli.py --version` → missing_tool; `grep "\-\-version" rag_cli.py` → passed.
+
+**Assumptions:** Low risk. Main risk is adding the version flag to a subparser instead of the top-level parser, or accidentally changing parser logic beyond the minimal addition.
+
+**Open questions:**
+- Missing tool/dep for `python rag_cli.py --version` — needs env fix
+
+**Next:** If validation passes, this task is complete. No further code changes should be needed.
+
+---
+
+## Iteration 1 · 2026-03-17 02:39:34 UTC
+
+**Progress:** Verify the existing minimal `rag_cli.py` version-flag change using the correct Python executable/environment, without making further code changes unless verification reveals a real issue.
+
+**Decisions:** approved — executor exit 0. Validation: `.venv/bin/python rag_cli.py --version || python3 rag_cli.py --version || python rag_cli.py --version` → passed; `grep "\-\-version" rag_cli.py` → passed.
+
+**Assumptions:** Low risk. Main risk is mistaking an environment PATH issue for a code defect and making unnecessary edits. Secondary risk is using a Python executable that imports a different environment than the repo expects.
+
+**Next:** If the version command succeeds with the expected output and grep confirms the flag/docstring line, the task is complete with no further changes needed.
+
+---
+

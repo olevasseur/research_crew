@@ -56,4 +56,20 @@ echo "=== 11. Inspect summary-meta (final) ==="
 "$PYTHON" rag_cli.py inspect summary-meta "$BOOK_ID"
 
 echo ""
+echo "=== 12. Trace idea through summaries ==="
+"$PYTHON" rag_cli.py trace "$BOOK_ID" --idea "attention"
+
+echo ""
+echo "=== 13. Explore one section ==="
+"$PYTHON" rag_cli.py explore "$BOOK_ID" --section "Chapter 1: A Lopsided Arms Race"
+
+echo ""
+echo "=== 14. Trace with --show sections only ==="
+"$PYTHON" rag_cli.py trace "$BOOK_ID" --idea "solitude" --show sections --limit 5
+
+echo ""
+echo "=== 15. Explore with --show windows only ==="
+"$PYTHON" rag_cli.py explore "$BOOK_ID" --section "Introduction" --show windows
+
+echo ""
 echo "Done."
