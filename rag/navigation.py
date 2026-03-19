@@ -264,14 +264,28 @@ def _compact_preview(text: str, max_lines: int = 6, max_chars: int = 400) -> str
 def _find_section(
     sections: list[tuple[str, str]], target: str,
 ) -> tuple[str, str] | None:
-    """Case-insensitive fuzzy match on section name."""
-    target_lower = target.lower().strip()
+    """Deterministic section match: exact → normalized → unambiguous partial.
+
+    Returns None if not found or if the partial match is ambiguous (multiple
+    sections contain the target string).  The caller is expected to print a
+    helpful error in that case.
+    """
+    norm = _normalize(target)
+    # 1. Exact match (case-insensitive, whitespace-normalized)
     for name, text in sections:
-        if name.lower().strip() == target_lower:
+        if _normalize(name) == norm:
             return name, text
-    for name, text in sections:
-        if target_lower in name.lower():
-            return name, text
+    # 2. Partial match — only accept when unambiguous
+    partial = [(name, text) for name, text in sections if norm in _normalize(name)]
+    if len(partial) == 1:
+        return partial[0]
+    if len(partial) > 1:
+        # Signal ambiguity by returning a sentinel: None with a side-effect
+        # isn't great, so we raise a ValueError the caller can catch.
+        raise ValueError(
+            f"Ambiguous section query '{target}' matches multiple sections: "
+            + ", ".join(f"'{n}'" for n, _ in partial)
+        )
     return None
 
 
@@ -280,11 +294,13 @@ def explore_section(
     section_name: str,
     config: RAGConfig,
     show: str = "all",
+    show_windows: int = 3,
 ) -> None:
     """Explore one section in structured, readable format.
 
     Args:
         show: "all", "summary", or "windows"
+        show_windows: max number of selected windows to display (0 = all)
     """
     results_dir = Path(config.storage.results_directory) / book_id
     meta_path = results_dir / "summary_meta.json"
@@ -299,7 +315,12 @@ def explore_section(
     insights_text = insights_path.read_text()
     sections = _parse_section_summaries(insights_text)
 
-    found = _find_section(sections, section_name)
+    try:
+        found = _find_section(sections, section_name)
+    except ValueError as exc:
+        print(str(exc))
+        return
+
     if not found:
         available = [name for name, _ in sections]
         print(f"Section '{section_name}' not found in summaries for '{book_id}'.")
@@ -366,12 +387,16 @@ def explore_section(
         windows = window_data.get(sec_name, [])
         sel_detail = selection_data.get(sec_name, [])
 
+        window_limit = show_windows if show_windows > 0 else len(windows)
+        windows_display = windows[:window_limit]
+
         if windows:
+            total_str = f" (showing {len(windows_display)}/{len(windows)})" if len(windows_display) < len(windows) else f" ({len(windows)})"
             print(f"\n{'─' * 70}")
-            print(f"  Selected Window Summaries ({len(windows)})")
+            print(f"  Selected Window Summaries{total_str}")
             print(f"{'─' * 70}")
 
-            for ws in windows:
+            for ws in windows_display:
                 wi = ws.get("window", "?")
                 wi_display = wi + 1 if isinstance(wi, int) else wi
                 labels = ws.get("labels", [])

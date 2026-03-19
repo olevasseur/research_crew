@@ -112,6 +112,7 @@ def cmd_explore(args):
     explore_section(
         args.book_id, args.section, config,
         show=args.show,
+        show_windows=args.windows,
     )
 
 
@@ -265,6 +266,8 @@ def main():
     p_expl.add_argument("--section", required=True, help="Section name to explore")
     p_expl.add_argument("--show", default="all", choices=["all", "summary", "windows"],
                         help="Show summary subsections, window previews, or both")
+    p_expl.add_argument("--windows", type=int, default=3,
+                        help="Max selected windows to display (0 = all, default 3)")
     p_expl.set_defaults(func=cmd_explore)
 
     # --- trace ---
