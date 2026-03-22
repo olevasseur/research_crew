@@ -200,6 +200,11 @@ def cmd_inspect(args):
             print("Usage: inspect structure <book_id>")
             return
         inspect_utils.inspect_structure(args.book_id, config)
+    elif args.what == "window":
+        if not args.book_id or args.window is None:
+            print("Usage: inspect window <book_id> --window <id>")
+            return
+        inspect_utils.inspect_window(args.book_id, args.window, config, section=args.chapter)
     elif args.what == "search":
         query = args.query or args.book_id
         if not query:
@@ -305,13 +310,15 @@ def main():
     # --- inspect ---
     p_ins = sub.add_parser("inspect", help="Inspect data and results")
     p_ins.add_argument("what", choices=[
-        "books", "chunks", "subchunks", "windows", "selection",
+        "books", "chunks", "subchunks", "windows", "window", "selection",
         "summary", "summary-meta", "search", "structure",
     ])
     p_ins.add_argument("book_id", nargs="?", default=None)
     p_ins.add_argument("--chapter", default=None)
     p_ins.add_argument("--query", default=None)
     p_ins.add_argument("--book", default=None, help="Scope search to a single book")
+    p_ins.add_argument("--window", type=int, default=None,
+                       help="1-based window index to zoom into (use with 'window')")
     p_ins.set_defaults(func=cmd_inspect)
 
     args = parser.parse_args()

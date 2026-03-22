@@ -301,6 +301,161 @@ def inspect_summary(book_id: str, config: RAGConfig) -> None:
             print(f"  {name}: not yet generated")
 
 
+def inspect_window(
+    book_id: str,
+    window_id: int,
+    config: RAGConfig,
+    section: str | None = None,
+) -> None:
+    """Show the full content of one window: summary + original chunks + context.
+
+    window_id is 1-based (as displayed to the user).  Internally windows are
+    stored 0-based in window_summaries.json under the ``window`` key.
+    """
+    import re
+
+    def _norm(s: str) -> str:
+        return re.sub(r"\s+", " ", s.lower().strip())
+
+    results_dir = Path(config.storage.results_directory) / book_id
+    ws_path = results_dir / "window_summaries.json"
+    meta_path = results_dir / "summary_meta.json"
+    sel_path = results_dir / "selection_detail.json"
+
+    if not ws_path.exists():
+        print(f"No window summaries found for '{book_id}'. Run summarize first.")
+        return
+
+    window_data = json.loads(ws_path.read_text())
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    sel_data = json.loads(sel_path.read_text()) if sel_path.exists() else {}
+
+    target_idx = window_id - 1  # stored 0-based
+
+    # --- Narrow to one section if requested ---
+    if section:
+        norm = _norm(section)
+        matched = [s for s in window_data if norm in _norm(s)]
+        if not matched:
+            print(f"Section '{section}' not found in summaries for '{book_id}'.")
+            print("\nAvailable sections:")
+            for s in window_data:
+                print(f"  - {s}")
+            return
+        if len(matched) > 1:
+            print(f"Ambiguous --chapter '{section}' matches multiple sections:")
+            for s in matched:
+                print(f"  - {s}")
+            print("Use a more specific value.")
+            return
+        sections_to_search: dict = {matched[0]: window_data[matched[0]]}
+    else:
+        sections_to_search = window_data
+
+    # --- Find the window ---
+    candidates: list[tuple[str, dict]] = []
+    for sec_name, windows in sections_to_search.items():
+        for ws in windows:
+            if ws.get("window") == target_idx:
+                candidates.append((sec_name, ws))
+
+    if not candidates:
+        print(f"Window {window_id} not found in '{book_id}'.")
+        print("\nAvailable window indices per section:")
+        for sec_name, windows in sections_to_search.items():
+            ids = [
+                str(ws["window"] + 1) if isinstance(ws.get("window"), int) else str(ws.get("window", "?"))
+                for ws in windows
+            ]
+            print(f"  {sec_name}: {', '.join(ids)}")
+        return
+
+    if len(candidates) > 1:
+        print(f"Window {window_id} appears in multiple sections:")
+        for sec, _ in candidates:
+            print(f"  - {sec}")
+        print("Use --chapter to disambiguate.")
+        return
+
+    found_sec, found_ws = candidates[0]
+
+    # --- Selection detail entry for this window ---
+    sel_entry = next(
+        (d for d in sel_data.get(found_sec, []) if d.get("index") == target_idx),
+        None,
+    )
+
+    # --- Load chunk text from vectorstore ---
+    retrieval = Retrieval(config)
+    chunk_ids: list[str] = found_ws.get("chunk_ids", [])
+    chapter_chunks = retrieval.get_chapter_chunks(book_id, found_sec)
+    chunk_map = {c["id"]: c for c in chapter_chunks}
+
+    # --- Page range: span across all chunks in the window ---
+    starts: list[int] = []
+    ends: list[int] = []
+    for cid in chunk_ids:
+        c = chunk_map.get(cid)
+        if c:
+            if c.get("page_start") is not None:
+                starts.append(c["page_start"])
+            if c.get("page_end") is not None:
+                ends.append(c["page_end"])
+    if starts and ends:
+        pages = f"{min(starts)}\u2013{max(ends)}"
+    else:
+        ranges = [chunk_map[cid].get("page_range", "") for cid in chunk_ids if cid in chunk_map]
+        pages = ", ".join(r for r in ranges if r) or "?"
+
+    wi_display = target_idx + 1
+    labels = found_ws.get("labels", [])
+    labels_str = " + ".join(labels) if labels else "general"
+    score = found_ws.get("score", 0)
+
+    sec_meta_map = {s["name"]: s for s in meta.get("sections", [])}
+    total_windows = sec_meta_map.get(found_sec, {}).get("windows_total", "?")
+
+    selected = sel_entry.get("selected", True) if sel_entry else True
+    sel_str = "yes" if selected else "no"
+    rank_str = f"{wi_display} of {total_windows}"
+
+    # --- Header ---
+    print(f"\n{'=' * 70}")
+    print(f"  Window {wi_display}  ({found_sec})")
+    print(f"{'=' * 70}")
+    print(f"  Pages: {pages}")
+    print(f"  Tags:  {labels_str}")
+    print(f"  Score: {score:.3f}")
+
+    # --- Summary ---
+    print(f"\n{'─' * 70}")
+    print(f"\n  [Summary]")
+    for line in found_ws.get("summary", "").strip().split("\n"):
+        print(f"  {line}")
+
+    # --- Full text ---
+    print(f"\n{'─' * 70}")
+    print(f"\n  [Full Text]")
+    for cid in chunk_ids:
+        chunk = chunk_map.get(cid)
+        if chunk:
+            print(f"\n  --- {cid}  (p.{chunk.get('page_range', '?')}) ---\n")
+            for line in chunk.get("text", "").split("\n"):
+                print(f"  {line}")
+        else:
+            print(f"\n  --- {cid}  (not found in vectorstore) ---")
+
+    # --- Context ---
+    print(f"\n{'─' * 70}")
+    print(f"\n  [Context]")
+    print(f"  Section:  {found_sec}")
+    print(f"  Selected: {sel_str}")
+    print(f"  Rank:     {rank_str}")
+    if sel_entry and sel_entry.get("reason"):
+        print(f"  Reason:   {sel_entry['reason']}")
+    print()
+
+
 def inspect_retrieval(query: str, config: RAGConfig, book_id: str | None = None) -> None:
     """Run a retrieval query and print the results with metadata."""
     retrieval = Retrieval(config)
