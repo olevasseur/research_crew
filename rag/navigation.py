@@ -36,13 +36,28 @@ def _count_matches(text: str, variants: list[str]) -> int:
 
 
 def _snippet_around(text: str, variant: str, context_chars: int = 120) -> str | None:
-    """Extract a short snippet around the first match of variant in text."""
+    """Extract a short snippet around the first match of variant in text.
+
+    Edges are snapped to the nearest word boundary so the snippet never
+    starts or ends in the middle of a word.
+    """
     lowered = text.lower()
     pos = lowered.find(variant)
     if pos == -1:
         return None
     start = max(0, pos - context_chars)
     end = min(len(text), pos + len(variant) + context_chars)
+
+    # Snap start to the beginning of a word (walk back past any partial word).
+    if start > 0:
+        while start > 0 and not text[start - 1].isspace():
+            start -= 1
+
+    # Snap end to after the end of a word (walk forward past any partial word).
+    if end < len(text):
+        while end < len(text) and not text[end].isspace():
+            end += 1
+
     # Convert heading lines (## / ###) to [Label] before collapsing newlines so
     # the label is clearly separated from the body text in the flattened snippet.
     raw = re.sub(r"#{2,}\s+(.+)", r"[\1]", text[start:end])

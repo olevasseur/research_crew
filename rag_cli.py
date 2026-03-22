@@ -11,6 +11,7 @@ Usage:
     python rag_cli.py verify <book_id>
     python rag_cli.py compare <book_id> <book_id> [<book_id> ...]
     python rag_cli.py ask "<question>"    [--books <id,id,...>]
+    python rag_cli.py inspect-window <book_id> --window N [--section "<section>"]
     python rag_cli.py inspect books
     python rag_cli.py inspect structure <book_id>
     python rag_cli.py inspect chunks <book_id> [--chapter CH]
@@ -114,6 +115,12 @@ def cmd_explore(args):
         show=args.show,
         show_windows=args.windows,
     )
+
+
+def cmd_inspect_window(args):
+    from rag import inspect_utils
+    config = load_config(args.config)
+    inspect_utils.inspect_window(args.book_id, args.window, config, section=args.section)
 
 
 def cmd_verify(args):
@@ -300,6 +307,14 @@ def main():
     p_ask.add_argument("question")
     p_ask.add_argument("--books", default=None, help="Comma-separated book IDs to scope the search")
     p_ask.set_defaults(func=cmd_ask)
+
+    # --- inspect-window ---
+    p_iw = sub.add_parser("inspect-window", help="Zoom into a window: full summary + original text")
+    p_iw.add_argument("book_id")
+    p_iw.add_argument("--window", type=int, required=True, help="1-based window index")
+    p_iw.add_argument("--section", default=None,
+                      help="Section name (exact, normalized, or unambiguous partial)")
+    p_iw.set_defaults(func=cmd_inspect_window)
 
     # --- inspect-structure ---
     p_struct = sub.add_parser("inspect-structure", help="Dry-run structure detection on a file")

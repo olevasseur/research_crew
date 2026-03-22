@@ -343,10 +343,10 @@ def inspect_window(
                 print(f"  - {s}")
             return
         if len(matched) > 1:
-            print(f"Ambiguous --chapter '{section}' matches multiple sections:")
+            print(f"Ambiguous --section '{section}' matches multiple sections:")
             for s in matched:
                 print(f"  - {s}")
-            print("Use a more specific value.")
+            print("Use a more specific --section value.")
             return
         sections_to_search: dict = {matched[0]: window_data[matched[0]]}
     else:
@@ -374,7 +374,7 @@ def inspect_window(
         print(f"Window {window_id} appears in multiple sections:")
         for sec, _ in candidates:
             print(f"  - {sec}")
-        print("Use --chapter to disambiguate.")
+        print("Use --section to disambiguate.")
         return
 
     found_sec, found_ws = candidates[0]
