@@ -19,7 +19,9 @@ import json
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+
+_UI_HTML = (Path(__file__).parent / "rag_ui.html").read_text()
 
 from rag.config import load_config
 
@@ -70,6 +72,12 @@ def _capture(fn, *args, **kwargs) -> str:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+@app.get("/", include_in_schema=False)
+def ui():
+    """Mobile-friendly navigation UI."""
+    return HTMLResponse(_UI_HTML)
+
 
 @app.get("/health", tags=["meta"])
 def health():
