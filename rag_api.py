@@ -111,9 +111,13 @@ def trace(
     idea: str = Query(..., description="Idea or concept to trace through summaries"),
     limit: int = Query(20, description="Max matching sections to return"),
     show: str = Query("both", description="'both', 'sections', or 'windows'"),
+    fmt: str = Query("text", description="'text' for plain output, 'structured' for JSON cards"),
 ):
     """Trace an idea through a book's summaries."""
     _require_book(book_id)
+    if fmt == "structured":
+        from rag.navigation import trace_idea_data
+        return trace_idea_data(book_id, idea, _config, limit=limit)
     from rag.navigation import trace_idea
     output = _capture(trace_idea, book_id, idea, _config, limit=limit, show=show)
     return {"book_id": book_id, "idea": idea, "output": output}

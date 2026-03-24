@@ -191,6 +191,106 @@ def trace_idea(
     print()
 
 
+def trace_idea_data(
+    book_id: str,
+    idea: str,
+    config: RAGConfig,
+    limit: int = 20,
+) -> dict:
+    """Return structured trace results as a plain dict for UI rendering.
+
+    Identical computation to trace_idea() but returns data instead of printing.
+    Keys: book_id, idea, sections_searched, windows_searched, matching_count,
+          quality, model, matches.
+    """
+    results_dir = Path(config.storage.results_directory) / book_id
+    meta_path = results_dir / "summary_meta.json"
+    insights_path = results_dir / "chapter_insights.md"
+    windows_path = results_dir / "window_summaries.json"
+
+    if not insights_path.exists():
+        return {
+            "book_id": book_id, "idea": idea,
+            "sections_searched": 0, "windows_searched": 0,
+            "matching_count": 0, "quality": None, "model": None,
+            "matches": [],
+            "error": f"No summaries found for '{book_id}'. Run summarize first.",
+        }
+
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    insights_text = insights_path.read_text()
+    window_data = json.loads(windows_path.read_text()) if windows_path.exists() else {}
+    section_meta_map = {s["name"]: s for s in meta.get("sections", [])}
+
+    variants = _term_variants(idea)
+    sections = _parse_section_summaries(insights_text)
+    matches: list[dict] = []
+
+    for sec_name, sec_text in sections:
+        sec_hits = _count_matches(sec_text, variants)
+        sec_snippet = None
+        if sec_hits > 0:
+            sec_content = _section_content(sec_text)
+            for v in variants:
+                sec_snippet = _snippet_around(sec_content, v)
+                if sec_snippet:
+                    break
+
+        win_matches: list[dict] = []
+        for ws in window_data.get(sec_name, []):
+            ws_text = ws.get("summary", "")
+            ws_hits = _count_matches(ws_text, variants)
+            if ws_hits > 0:
+                ws_snippet = None
+                for v in variants:
+                    ws_snippet = _snippet_around(ws_text, v)
+                    if ws_snippet:
+                        break
+                wi = ws.get("window", "?")
+                win_matches.append({
+                    "window": wi + 1 if isinstance(wi, int) else wi,
+                    "hits": ws_hits,
+                    "labels": ws.get("labels", []),
+                    "snippet": ws_snippet or "",
+                })
+
+        total_hits = sec_hits + sum(w["hits"] for w in win_matches)
+        if total_hits == 0:
+            continue
+
+        sm = section_meta_map.get(sec_name, {})
+        match_source = []
+        if sec_hits > 0:
+            match_source.append("section_summary")
+        if win_matches:
+            match_source.append("window_summaries")
+
+        matches.append({
+            "section": sec_name,
+            "section_type": sm.get("type", "?"),
+            "pages": sm.get("pages", "?"),
+            "total_hits": total_hits,
+            "sec_hits": sec_hits,
+            "sec_snippet": sec_snippet,
+            "window_matches": win_matches,
+            "match_source": match_source,
+        })
+
+    matches.sort(key=lambda m: m["total_hits"], reverse=True)
+
+    total_windows = sum(len(window_data.get(s[0], [])) for s in sections)
+    return {
+        "book_id": book_id,
+        "idea": idea,
+        "sections_searched": len(sections),
+        "windows_searched": total_windows,
+        "matching_count": len(matches),
+        "quality": meta.get("quality"),
+        "model": meta.get("model"),
+        "matches": matches[:limit],
+    }
+
+
 def _section_content(sec_text: str) -> str:
     """Return sec_text with the ## heading and inline metadata lines stripped.
 
