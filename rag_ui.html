@@ -99,6 +99,27 @@
       display: block;
     }
 
+    /* ── Sections list ───────────────────────────────────────────────── */
+    .sections-list { display: flex; flex-direction: column; gap: 6px; }
+    .section-btn {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      padding: 11px 14px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      text-align: left;
+      cursor: pointer;
+      color: var(--text);
+      width: 100%;
+      line-height: 1.4;
+      transition: border-color 0.15s;
+    }
+    .section-btn:active { background: var(--bg3); }
+    .section-btn-name { font-size: 0.9rem; font-weight: 500; flex: 1; }
+    .section-btn-meta { font-size: 0.72rem; color: var(--text3); white-space: nowrap; flex-shrink: 0; }
+
     /* ── Form elements ───────────────────────────────────────────────── */
     label {
       display: block;
@@ -202,7 +223,8 @@
       font-weight: 700;
       flex-shrink: 0;
     }
-    /* ── Trace result cards ──────────────────────────────────────── */
+
+    /* ── Trace result cards ──────────────────────────────────────────── */
     .trace-meta-line {
       font-size: 0.78rem;
       color: var(--text3);
@@ -248,20 +270,56 @@
     .trace-snippet-text { font-size: 0.88rem; line-height: 1.62; color: var(--text); }
     .trace-window {
       border-left: 3px solid var(--accent);
-      padding: 8px 10px 8px 12px;
+      padding: 0 10px 8px 12px;
       border-radius: 0 6px 6px 0;
       background: var(--bg2);
     }
-    .trace-window-hd {
+    /* Tappable window header — button reset + style */
+    .trace-window-btn {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      width: 100%;
+      background: none;
+      border: none;
+      padding: 8px 0 6px;
+      text-align: left;
+      cursor: pointer;
+      color: var(--accent);
+      font: inherit;
       font-size: 0.78rem;
       font-weight: 600;
-      color: var(--accent);
-      margin-bottom: 5px;
     }
+    .trace-window-btn:active { opacity: 0.7; }
     .trace-label-tag { font-size: 0.7rem; color: var(--text3); font-weight: 400; }
+    .trace-tap-hint {
+      font-size: 0.65rem;
+      color: var(--text3);
+      font-weight: 400;
+      margin-left: auto;
+      padding-left: 8px;
+    }
     .trace-empty { font-size: 0.9rem; color: var(--text2); padding: 14px 0 6px; }
     .trace-loading { font-size: 0.9rem; color: var(--text3); padding: 10px 0; }
     .trace-error { font-size: 0.88rem; color: var(--error); padding: 6px 0; }
+
+    /* ── Inspect prev/next nav ───────────────────────────────────────── */
+    .inspect-nav { display: flex; gap: 8px; margin-top: 10px; }
+    .btn-nav {
+      flex: 1;
+      padding: 13px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      color: var(--text);
+      text-align: center;
+      transition: background 0.15s;
+    }
+    .btn-nav:active { background: var(--bg3); }
+    .btn-nav:disabled { opacity: 0.35; cursor: default; }
   </style>
 </head>
 <body>
@@ -279,6 +337,12 @@
   <div id="nav-panel">
 
     <span id="selected-label"></span>
+
+    <!-- 0. Sections list -->
+    <div class="card">
+      <h2>Sections</h2>
+      <div id="sections-list"><p class="hint">Loading…</p></div>
+    </div>
 
     <!-- 1. Trace -->
     <div class="card">
@@ -300,7 +364,7 @@
         <span class="badge">2</span>
         <h2 style="margin-bottom:0">Explore a section</h2>
       </div>
-      <p class="hint">Copy a section name from trace results above, or type a partial name.</p>
+      <p class="hint">Tap a section above, or type a partial name.</p>
       <label for="explore-section">Section name</label>
       <input type="text" id="explore-section" placeholder="e.g. Chapter 4: Spend Time Alone">
       <button class="btn-run" onclick="runExplore()">Explore</button>
@@ -315,7 +379,7 @@
         <span class="badge">3</span>
         <h2 style="margin-bottom:0">Inspect a window</h2>
       </div>
-      <p class="hint">Window numbers repeat across sections — add the section name to be precise.</p>
+      <p class="hint">Tap a window in trace results, or enter section + number manually.</p>
       <label for="inspect-section">Section (recommended)</label>
       <input type="text" id="inspect-section" placeholder="e.g. Chapter 4: Spend Time Alone">
       <label for="inspect-window-num">Window number</label>
@@ -323,6 +387,10 @@
       <button class="btn-run" onclick="runInspect()">Inspect Window</button>
       <div class="output-wrap" id="inspect-wrap">
         <div class="output" id="inspect-out"></div>
+        <div class="inspect-nav" id="inspect-nav" style="display:none">
+          <button class="btn-nav" id="btn-prev" onclick="inspectStep(-1)" disabled>← Prev</button>
+          <button class="btn-nav" id="btn-next" onclick="inspectStep(1)" disabled>Next →</button>
+        </div>
       </div>
     </div>
 
@@ -330,6 +398,17 @@
 
   <script>
     let bookId = null;
+
+    // Stored trace data (Feature 3: state preserved across navigate)
+    let _traceData = null;
+
+    // Section list from /sections (Feature 1)
+    let _sections = [];
+
+    // Inspect navigation state (Feature 4)
+    let _inspectWins = [];
+    let _inspectSection = null;
+    let _inspectCurrent = null;
 
     /* ── Books ───────────────────────────────────────────────────────── */
     async function loadBooks() {
@@ -354,11 +433,13 @@
 
     function selectBook(id, btn) {
       bookId = id;
+      _traceData = null;
       document.querySelectorAll('.book-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById('selected-label').textContent = '📖 ' + id;
       document.getElementById('nav-panel').style.display = 'block';
       clearOutputs();
+      loadSections(id);
       window.scrollTo({ top: document.getElementById('nav-panel').offsetTop - 8, behavior: 'smooth' });
     }
 
@@ -366,11 +447,42 @@
       ['trace-wrap','explore-wrap','inspect-wrap'].forEach(id => {
         document.getElementById(id).classList.remove('visible');
       });
+      document.getElementById('inspect-nav').style.display = 'none';
+    }
+
+    /* ── Sections list (Feature 1) ───────────────────────────────────── */
+    async function loadSections(id) {
+      const list = document.getElementById('sections-list');
+      list.innerHTML = '<p class="hint">Loading…</p>';
+      try {
+        const r = await fetch(`/books/${encodeURIComponent(id)}/sections`);
+        const d = await r.json();
+        _sections = d.sections || [];
+        if (_sections.length === 0) {
+          list.innerHTML = '<p class="hint">No summarised sections found.</p>';
+          return;
+        }
+        list.innerHTML = '<div class="sections-list">' +
+          _sections.map((s, i) => `
+            <button class="section-btn" onclick="tapSection(${i})">
+              <span class="section-btn-name">${esc(s.name)}</span>
+              <span class="section-btn-meta">${esc(s.type)} · pp.&nbsp;${esc(s.pages)}</span>
+            </button>`).join('') +
+          '</div>';
+      } catch (e) {
+        list.innerHTML = '<p class="hint" style="color:var(--error)">Failed to load sections.</p>';
+      }
+    }
+
+    function tapSection(idx) {
+      const name = _sections[idx].name;
+      document.getElementById('explore-section').value = name;
+      runExplore();
+      document.getElementById('explore-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     /* ── Output helpers ──────────────────────────────────────────────── */
     function setOutput(wrapId, outId, text, kind) {
-      // kind: 'loading' | 'error' | 'ok'
       const wrap = document.getElementById(wrapId);
       const out  = document.getElementById(outId);
       out.textContent = text;
@@ -379,7 +491,7 @@
       wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
-    /* ── Trace ───────────────────────────────────────────────────────── */
+    /* ── Trace (Feature 2: tappable windows; Feature 3: state preserved) */
     function setTraceHTML(html) {
       const wrap = document.getElementById('trace-wrap');
       document.getElementById('trace-out').innerHTML = html;
@@ -396,7 +508,12 @@
         const r = await fetch(`/books/${encodeURIComponent(bookId)}/trace?` +
           new URLSearchParams({ idea, fmt: 'structured' }));
         const d = await r.json();
-        setTraceHTML(r.ok ? renderTraceData(d) : `<p class="trace-error">${esc(d.detail || 'Error')}</p>`);
+        if (r.ok) {
+          _traceData = d;  // preserve state
+          setTraceHTML(renderTraceData(d));
+        } else {
+          setTraceHTML(`<p class="trace-error">${esc(d.detail || 'Error')}</p>`);
+        }
       } catch (e) { setTraceHTML(`<p class="trace-error">Request failed: ${esc(e.message)}</p>`); }
     }
 
@@ -413,7 +530,7 @@
           `Try a different phrasing.</p>`;
       }
 
-      html += matches.map((m, i) => {
+      html += matches.map((m, mi) => {
         const pages  = m.pages && m.pages !== '?' ? ` · pp.&nbsp;${esc(m.pages)}` : '';
         let body = '';
 
@@ -424,19 +541,23 @@
           </div>`;
         }
 
-        for (const wm of (m.window_matches || [])) {
+        for (let wi = 0; wi < (m.window_matches || []).length; wi++) {
+          const wm = m.window_matches[wi];
           const labels = wm.labels && wm.labels.length ? wm.labels.join(' · ') : 'general';
+          // Feature 2: window header is a tappable button
           body += `<div class="trace-window">
-            <div class="trace-window-hd">Window ${wm.window}
-              <span class="trace-label-tag"> · ${esc(labels)} · ${wm.hits} hit${wm.hits !== 1 ? 's' : ''}</span>
-            </div>
+            <button class="trace-window-btn" onclick="jumpToInspect(${mi},${wi})">
+              <span>Window&nbsp;${wm.window}</span>
+              <span class="trace-label-tag">&nbsp;· ${esc(labels)} · ${wm.hits} hit${wm.hits !== 1 ? 's' : ''}</span>
+              <span class="trace-tap-hint">inspect →</span>
+            </button>
             ${wm.snippet ? `<div class="trace-snippet-text">${fmtSnippet(wm.snippet)}</div>` : ''}
           </div>`;
         }
 
         return `<div class="trace-match">
           <div class="trace-match-hd">
-            <div><span class="trace-rank">#${i + 1}</span><span class="trace-title">${esc(m.section)}</span></div>
+            <div><span class="trace-rank">#${mi + 1}</span><span class="trace-title">${esc(m.section)}</span></div>
             <div class="trace-section-meta">${esc(m.section_type)}${pages} · ${m.total_hits} hits</div>
           </div>
           <div class="trace-body">${body}</div>
@@ -444,6 +565,17 @@
       }).join('');
 
       return html;
+    }
+
+    /* Feature 2: jump from trace window to inspect */
+    function jumpToInspect(matchIdx, windowIdx) {
+      if (!_traceData) return;
+      const m  = _traceData.matches[matchIdx];
+      const wm = m.window_matches[windowIdx];
+      document.getElementById('inspect-section').value    = m.section;
+      document.getElementById('inspect-window-num').value = wm.window;
+      runInspect();
+      document.getElementById('inspect-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     /* Escape HTML, then render **bold** and [Label] markers from snippets. */
@@ -466,20 +598,58 @@
       } catch (e) { setOutput('explore-wrap','explore-out','Request failed: ' + e.message,'error'); }
     }
 
-    /* ── Inspect window ──────────────────────────────────────────────── */
+    /* ── Inspect window (Feature 4: prev/next nav) ───────────────────── */
     async function runInspect() {
       if (!bookId) return;
       const section = document.getElementById('inspect-section').value.trim();
       const win     = document.getElementById('inspect-window-num').value.trim();
       if (!win) { setOutput('inspect-wrap','inspect-out','Please enter a window number.','error'); return; }
       setOutput('inspect-wrap','inspect-out','Loading…','loading');
+      document.getElementById('inspect-nav').style.display = 'none';
       try {
         const params = new URLSearchParams({ window: win });
         if (section) params.set('section', section);
         const r = await fetch(`/books/${encodeURIComponent(bookId)}/inspect-window?` + params);
         const d = await r.json();
         setOutput('inspect-wrap','inspect-out', r.ok ? d.output : (d.detail || 'Error'), r.ok ? 'ok' : 'error');
+        if (r.ok && section) {
+          loadInspectNav(section, parseInt(win, 10));
+        }
       } catch (e) { setOutput('inspect-wrap','inspect-out','Request failed: ' + e.message,'error'); }
+    }
+
+    /* Feature 4: load available windows and render prev/next buttons */
+    async function loadInspectNav(section, currentWin) {
+      _inspectSection = section;
+      _inspectCurrent = currentWin;
+      try {
+        const r = await fetch(`/books/${encodeURIComponent(bookId)}/section-windows?` +
+          new URLSearchParams({ section }));
+        const d = await r.json();
+        _inspectWins = d.windows || [];
+        renderInspectNav(currentWin);
+      } catch (e) {
+        document.getElementById('inspect-nav').style.display = 'none';
+      }
+    }
+
+    function renderInspectNav(currentWin) {
+      const nav  = document.getElementById('inspect-nav');
+      if (_inspectWins.length < 2) { nav.style.display = 'none'; return; }
+      const idx  = _inspectWins.indexOf(currentWin);
+      document.getElementById('btn-prev').disabled = (idx <= 0);
+      document.getElementById('btn-next').disabled = (idx < 0 || idx >= _inspectWins.length - 1);
+      nav.style.display = 'flex';
+    }
+
+    function inspectStep(dir) {
+      const idx  = _inspectWins.indexOf(_inspectCurrent);
+      const next = _inspectWins[idx + dir];
+      if (next === undefined) return;
+      _inspectCurrent = next;
+      document.getElementById('inspect-window-num').value = next;
+      if (_inspectSection) document.getElementById('inspect-section').value = _inspectSection;
+      runInspect();
     }
 
     /* ── Enter key support ───────────────────────────────────────────── */

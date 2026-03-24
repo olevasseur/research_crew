@@ -152,6 +152,39 @@ def inspect_window(
     return {"book_id": book_id, "window": window, "section": section, "output": output}
 
 
+@app.get("/books/{book_id}/sections", tags=["navigation"])
+def list_sections(book_id: str):
+    """List all summarised sections with lightweight metadata."""
+    _require_book(book_id)
+    meta_path = _results_dir(book_id) / "summary_meta.json"
+    if not meta_path.exists():
+        return {"book_id": book_id, "sections": []}
+    meta = json.loads(meta_path.read_text())
+    return {
+        "book_id": book_id,
+        "sections": [
+            {"name": s["name"], "type": s.get("type", "?"), "pages": s.get("pages", "?")}
+            for s in meta.get("sections", [])
+        ],
+    }
+
+
+@app.get("/books/{book_id}/section-windows", tags=["navigation"])
+def section_windows(
+    book_id: str,
+    section: str = Query(..., description="Section name"),
+):
+    """Return sorted 1-based window indices available for a section."""
+    _require_book(book_id)
+    windows_path = _results_dir(book_id) / "window_summaries.json"
+    if not windows_path.exists():
+        return {"book_id": book_id, "section": section, "windows": []}
+    window_data = json.loads(windows_path.read_text())
+    raw = window_data.get(section, [])
+    ids = sorted(w["window"] + 1 for w in raw if isinstance(w.get("window"), int))
+    return {"book_id": book_id, "section": section, "windows": ids}
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
