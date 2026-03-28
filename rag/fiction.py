@@ -349,6 +349,42 @@ def extract_fiction_book(
 
 
 # ---------------------------------------------------------------------------
+# Chapter number -> snapshot key resolver
+# ---------------------------------------------------------------------------
+
+def _resolve_snapshot_key(fiction_state: dict, chapter_number: int) -> int | None:
+    """
+    Return the highest snapshot key whose chapter label number is <= chapter_number.
+
+    Searches by the numeric value embedded in the chapter name (e.g. "Chapter 10"),
+    so front-matter entries (e.g. "Chapter 24: Author's Note" at index 0) do not
+    cause an off-by-one when the user specifies --chapter N.
+
+    Falls back to raw index arithmetic if no chapter-numbered entries are found.
+    """
+    best_key: int | None = None
+    best_num = -1
+
+    for k, v in fiction_state.items():
+        chapter_name = v.get("chapter", "")
+        m = re.match(r"chapter\s+(\d+)(?:\s*:|$)", chapter_name, re.IGNORECASE)
+        if m:
+            n = int(m.group(1))
+            key_int = int(k)
+            if n <= chapter_number and (n > best_num or (n == best_num and key_int > (best_key or -1))):
+                best_num = n
+                best_key = key_int
+
+    if best_key is None:
+        # Fallback: treat keys as 0-based indices, chapter_number as 1-based
+        target_index = chapter_number - 1
+        available    = sorted(int(k) for k in fiction_state)
+        best_key     = max((k for k in available if k <= target_index), default=None)
+
+    return best_key
+
+
+# ---------------------------------------------------------------------------
 # State inspection
 # ---------------------------------------------------------------------------
 
@@ -367,10 +403,7 @@ def show_fiction_state(
 
     fiction_state = json.loads(state_path.read_text())
 
-    # chapter_number is 1-based; keys are 0-based chapter indices
-    target_index = chapter_number - 1
-    available    = sorted(int(k) for k in fiction_state)
-    resolved     = max((k for k in available if k <= target_index), default=None)
+    resolved = _resolve_snapshot_key(fiction_state, chapter_number)
 
     if resolved is None:
         print(f"No data for chapter {chapter_number}. Available indices: {[k + 1 for k in available]}")
@@ -380,7 +413,7 @@ def show_fiction_state(
     chapter_name = snap["chapter"]
     state        = snap["state"]
 
-    print(f"\nFiction state — up to chapter {resolved + 1}: {chapter_name}")
+    print(f"\nFiction state — up to: {chapter_name}")
     print("=" * 70)
 
     # Characters
@@ -393,7 +426,7 @@ def show_fiction_state(
             print(f"  {c['name']}{aliases}")
             if c.get("role"):
                 print(f"    role: {c['role']}")
-            print(f"    first seen: ch.{c.get('first_chapter_index', 0) + 1} — {c.get('first_chapter', '?')}")
+            print(f"    first seen: {c.get('first_chapter', '?')}")
     else:
         print("  (none)")
 
@@ -417,7 +450,7 @@ def show_fiction_state(
         for p in places:
             desc = f" — {p['description']}" if p.get("description") else ""
             print(f"  {p['name']}{desc}")
-            print(f"    first seen: ch.{p.get('first_chapter_index', 0) + 1} — {p.get('first_chapter', '?')}")
+            print(f"    first seen: {p.get('first_chapter', '?')}")
 
     # Events
     events = state.get("events", [])
@@ -427,7 +460,7 @@ def show_fiction_state(
         for e in events:
             chars_str = f" ({', '.join(e['characters'])})" if e.get("characters") else ""
             place_str = f" @ {e['place']}" if e.get("place") else ""
-            print(f"  [ch.{e.get('chapter_index', 0) + 1}] {e['description']}{chars_str}{place_str}")
+            print(f"  [{e.get('chapter', '?')}] {e['description']}{chars_str}{place_str}")
 
     # Time markers
     tms = state.get("time_markers", [])
@@ -436,5 +469,170 @@ def show_fiction_state(
         print("─" * 40)
         for tm in tms:
             print(f"  · {tm}")
+
+    print()
+
+
+# ---------------------------------------------------------------------------
+# Character profile (whois)
+# ---------------------------------------------------------------------------
+
+def fiction_whois(
+    book_id: str,
+    config: "RAGConfig",
+    chapter_number: int,    # 1-based (user-facing)
+    character_name: str,
+) -> None:
+    """Print a character profile up to the given chapter (1-based)."""
+    results_dir = Path(config.storage.results_directory) / book_id
+    state_path  = results_dir / "fiction_state.json"
+
+    if not state_path.exists():
+        print(f"Error: No fiction state found for '{book_id}'. Run 'fiction-extract' first.")
+        return
+
+    fiction_state = json.loads(state_path.read_text())
+
+    if not fiction_state:
+        print(f"Error: Fiction state for '{book_id}' is empty.")
+        return
+
+    if chapter_number < 1:
+        print("Error: --chapter must be >= 1.")
+        return
+
+    resolved = _resolve_snapshot_key(fiction_state, chapter_number)
+    available = sorted(int(k) for k in fiction_state)
+
+    if resolved is None:
+        print(
+            f"Error: Chapter {chapter_number} is before any available data. "
+            f"First available: chapter {min(available) + 1}."
+        )
+        return
+
+    if resolved < max(available) and chapter_number > max(available):
+        print(
+            f"Warning: Chapter {chapter_number} exceeds available data "
+            f"(max: {max(available) + 1}). Showing state up to chapter {max(available) + 1}."
+        )
+
+    snap  = fiction_state[str(resolved)]
+    state = snap["state"]
+
+    # --- Resolve character (case-insensitive on name and aliases) ---
+    query   = _norm(character_name)
+    matched = None
+    for c in state.get("characters", []):
+        if _norm(c["name"]) == query:
+            matched = c
+            break
+        for alias in c.get("aliases", []):
+            if _norm(alias) == query:
+                matched = c
+                break
+        if matched:
+            break
+
+    if matched is None:
+        known = [c["name"] for c in state.get("characters", [])]
+        if known:
+            print(
+                f"Error: Character '{character_name}' not found up to chapter {chapter_number}.\n"
+                f"Known characters: {', '.join(known)}"
+            )
+        else:
+            print(
+                f"Error: Character '{character_name}' not found. "
+                f"No characters known up to chapter {chapter_number}."
+            )
+        return
+
+    # Build the set of normalised names/aliases for this character
+    char_keys: set[str] = {_norm(matched["name"])}
+    for alias in matched.get("aliases", []):
+        if alias:
+            char_keys.add(_norm(alias))
+
+    def _involves_rel(r: dict) -> bool:
+        return _norm(r.get("character_a", "")) in char_keys \
+            or _norm(r.get("character_b", "")) in char_keys
+
+    def _involves_event(e: dict) -> bool:
+        return any(_norm(n) in char_keys for n in e.get("characters", []))
+
+    relevant_rels   = [r for r in state.get("relationships", []) if _involves_rel(r)]
+    relevant_events = sorted(
+        [e for e in state.get("events", []) if _involves_event(e)],
+        key=lambda e: e.get("chapter_index", 0),
+    )
+    recent_events   = list(reversed(relevant_events))   # most-recent first
+
+    # Places: deduplicated, drawn from events involving this character
+    seen_places: dict[str, str] = {}   # norm_key -> display name
+    for e in relevant_events:
+        place = e.get("place", "").strip()
+        if place:
+            key = _norm(place)
+            if key not in seen_places:
+                seen_places[key] = place
+
+    # --- Print report ---
+    ch_name = snap["chapter"]
+    print(f"\nCharacter: {matched['name']}")
+    print(f"Book: {book_id}  |  State up to: {ch_name}")
+    print("=" * 60)
+
+    # Role
+    role = matched.get("role") or "Unknown"
+    print(f"\nRole\n{'─' * 40}")
+    print(f"  {role}")
+
+    # Aliases
+    aliases = matched.get("aliases", [])
+    print(f"\nAliases\n{'─' * 40}")
+    print(f"  {', '.join(aliases) if aliases else 'None'}")
+
+    # First seen
+    fc_idx  = matched.get("first_chapter_index", 0)
+    fc_name = matched.get("first_chapter", "Unknown")
+    print(f"\nFirst Seen\n{'─' * 40}")
+    print(f"  {fc_name}")
+
+    # Relationships
+    print(f"\nRelationships Known So Far ({len(relevant_rels)})\n{'─' * 40}")
+    if relevant_rels:
+        for r in relevant_rels:
+            other = (
+                r["character_b"]
+                if _norm(r.get("character_a", "")) in char_keys
+                else r["character_a"]
+            )
+            desc = f": {r['description']}" if r.get("description") else ""
+            print(f"  ↔ {other}{desc}")
+            if r.get("evidence"):
+                print(f"      evidence: {r['evidence']}")
+    else:
+        print("  None so far")
+
+    # Recent events (most-recent first, capped at 10 for conciseness)
+    _MAX_EVENTS = 10
+    print(f"\nRecent Events Involving {matched['name']}\n{'─' * 40}")
+    if recent_events:
+        for e in recent_events[:_MAX_EVENTS]:
+            place_str = f" @ {e['place']}" if e.get("place") else ""
+            print(f"  [{e.get('chapter', '?')}] {e['description']}{place_str}")
+        if len(recent_events) > _MAX_EVENTS:
+            print(f"  … and {len(recent_events) - _MAX_EVENTS} earlier event(s)")
+    else:
+        print("  None so far")
+
+    # Places
+    print(f"\nPlaces Associated So Far\n{'─' * 40}")
+    if seen_places:
+        for place in seen_places.values():
+            print(f"  · {place}")
+    else:
+        print("  None so far")
 
     print()

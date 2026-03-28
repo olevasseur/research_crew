@@ -22,6 +22,7 @@ Usage:
     python rag_cli.py inspect summary-meta <book_id>
     python rag_cli.py inspect search "<query>" [--book <book_id>]
     python rag_cli.py inspect-structure <file>  [--debug]
+    python rag_cli.py fiction-whois <book_id> --chapter N --character "<name>"
     python rag_cli.py --version
 """
 
@@ -133,6 +134,12 @@ def cmd_fiction_state(args):
     from rag.fiction import show_fiction_state
     config = load_config(args.config)
     show_fiction_state(args.book_id, config, chapter_number=args.chapter)
+
+
+def cmd_fiction_whois(args):
+    from rag.fiction import fiction_whois
+    config = load_config(args.config)
+    fiction_whois(args.book_id, config, chapter_number=args.chapter, character_name=args.character)
 
 
 def cmd_verify(args):
@@ -319,6 +326,16 @@ def main():
     p_fst.add_argument("--chapter", type=int, required=True,
                        help="Show state up to and including this chapter (1-based)")
     p_fst.set_defaults(func=cmd_fiction_state)
+
+    # --- fiction-whois ---
+    p_fwho = sub.add_parser("fiction-whois",
+                             help="Show a character profile up to chapter N (spoiler-safe)")
+    p_fwho.add_argument("book_id")
+    p_fwho.add_argument("--chapter", type=int, required=True,
+                        help="Include only state up to and including this chapter (1-based)")
+    p_fwho.add_argument("--character", required=True,
+                        help="Character name (case-insensitive; aliases also matched)")
+    p_fwho.set_defaults(func=cmd_fiction_whois)
 
     # --- verify ---
     p_ver = sub.add_parser("verify", help="Verify a book summary against source chunks")
