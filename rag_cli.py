@@ -123,6 +123,18 @@ def cmd_inspect_window(args):
     inspect_utils.inspect_window(args.book_id, args.window, config, section=args.section)
 
 
+def cmd_fiction_extract(args):
+    from rag.fiction import extract_fiction_book
+    config = load_config(args.config)
+    extract_fiction_book(args.book_id, config, force=args.force)
+
+
+def cmd_fiction_state(args):
+    from rag.fiction import show_fiction_state
+    config = load_config(args.config)
+    show_fiction_state(args.book_id, config, chapter_number=args.chapter)
+
+
 def cmd_verify(args):
     from rag.critic import verify_book_summary
     config = load_config(args.config)
@@ -291,6 +303,22 @@ def main():
     p_trace.add_argument("--limit", type=int, default=20,
                          help="Max number of matching sections to display")
     p_trace.set_defaults(func=cmd_trace)
+
+    # --- fiction-extract ---
+    p_fex = sub.add_parser("fiction-extract",
+                            help="Extract per-chapter fiction facts (characters, places, events…)")
+    p_fex.add_argument("book_id")
+    p_fex.add_argument("--force", action="store_true",
+                       help="Re-extract even if artifacts already exist")
+    p_fex.set_defaults(func=cmd_fiction_extract)
+
+    # --- fiction-state ---
+    p_fst = sub.add_parser("fiction-state",
+                            help="Show cumulative fiction state up to chapter N (spoiler-safe)")
+    p_fst.add_argument("book_id")
+    p_fst.add_argument("--chapter", type=int, required=True,
+                       help="Show state up to and including this chapter (1-based)")
+    p_fst.set_defaults(func=cmd_fiction_state)
 
     # --- verify ---
     p_ver = sub.add_parser("verify", help="Verify a book summary against source chunks")
