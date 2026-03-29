@@ -6,6 +6,7 @@ Usage:
     python rag_cli.py ingest-folder <dir>
     python rag_cli.py summarize <book_id> [--mode M] [--quality Q] [--section S] [--force] [--verify] [--no-verify]
     python rag_cli.py evaluate <book_id>  [--section S]
+    python rag_cli.py review-eval <book_id>
     python rag_cli.py trace <book_id> --idea "<query>" [--show both|sections|windows] [--limit N]
     python rag_cli.py explore <book_id> --section "<section>" [--show all|summary|windows]
     python rag_cli.py verify <book_id>
@@ -99,6 +100,12 @@ def cmd_evaluate(args):
     print(result)
 
 
+def cmd_review_eval(args):
+    from rag.evaluate import review_eval
+    config = load_config(args.config)
+    print(review_eval(args.book_id, config))
+
+
 def cmd_trace(args):
     from rag.navigation import trace_idea
     config = load_config(args.config)
@@ -140,6 +147,12 @@ def cmd_fiction_whois(args):
     from rag.fiction import fiction_whois
     config = load_config(args.config)
     fiction_whois(args.book_id, config, chapter_number=args.chapter, character_name=args.character)
+
+
+def cmd_fiction_diff(args):
+    from rag.fiction import fiction_diff
+    config = load_config(args.config)
+    fiction_diff(args.book_id, config, from_chapter=args.from_chapter, to_chapter=args.to_chapter)
 
 
 def cmd_verify(args):
@@ -291,6 +304,14 @@ def main():
                         help="Evaluate one section (exact name). Omit for book-level evaluation.")
     p_eval.set_defaults(func=cmd_evaluate)
 
+    # --- review-eval ---
+    p_rev = sub.add_parser(
+        "review-eval",
+        help="Show a concise summary of existing evaluation artifacts (no LLM calls)",
+    )
+    p_rev.add_argument("book_id")
+    p_rev.set_defaults(func=cmd_review_eval)
+
     # --- explore ---
     p_expl = sub.add_parser("explore", help="Explore one section in structured detail")
     p_expl.add_argument("book_id")
@@ -336,6 +357,16 @@ def main():
     p_fwho.add_argument("--character", required=True,
                         help="Character name (case-insensitive; aliases also matched)")
     p_fwho.set_defaults(func=cmd_fiction_whois)
+
+    # --- fiction-diff ---
+    p_fdiff = sub.add_parser("fiction-diff",
+                              help="Show what changed between two reading points (spoiler-safe)")
+    p_fdiff.add_argument("book_id")
+    p_fdiff.add_argument("--from-chapter", type=int, required=True, dest="from_chapter",
+                         help="Starting chapter (1-based, exclusive lower bound)")
+    p_fdiff.add_argument("--to-chapter", type=int, required=True, dest="to_chapter",
+                         help="Ending chapter (1-based, inclusive)")
+    p_fdiff.set_defaults(func=cmd_fiction_diff)
 
     # --- verify ---
     p_ver = sub.add_parser("verify", help="Verify a book summary against source chunks")

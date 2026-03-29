@@ -636,3 +636,147 @@ def fiction_whois(
         print("  None so far")
 
     print()
+
+
+# ---------------------------------------------------------------------------
+# Diff between two reading points
+# ---------------------------------------------------------------------------
+
+def fiction_diff(
+    book_id: str,
+    config: RAGConfig,
+    from_chapter: int,   # 1-based
+    to_chapter: int,     # 1-based
+) -> None:
+    """Print what changed between two chapter reading points (spoiler-safe)."""
+    if from_chapter >= to_chapter:
+        print(f"Error: --from-chapter ({from_chapter}) must be less than --to-chapter ({to_chapter}).")
+        return
+
+    results_dir = Path(config.storage.results_directory) / book_id
+    state_path  = results_dir / "fiction_state.json"
+
+    if not state_path.exists():
+        print(f"No fiction state found for '{book_id}'. Run 'fiction-extract' first.")
+        return
+
+    fiction_state = json.loads(state_path.read_text())
+
+    from_key = _resolve_snapshot_key(fiction_state, from_chapter)
+    to_key   = _resolve_snapshot_key(fiction_state, to_chapter)
+
+    if from_key is None:
+        print(f"Error: No data available at or before chapter {from_chapter}.")
+        return
+    if to_key is None:
+        print(f"Error: No data available at or before chapter {to_chapter}.")
+        return
+    if from_key == to_key:
+        print(f"No new items: both chapters resolve to the same snapshot "
+              f"({fiction_state[str(from_key)]['chapter']}).")
+        return
+
+    from_state = fiction_state[str(from_key)]["state"]
+    to_state   = fiction_state[str(to_key)]["state"]
+    from_name  = fiction_state[str(from_key)]["chapter"]
+    to_name    = fiction_state[str(to_key)]["chapter"]
+
+    # --- Compute diffs ---
+    from_char_keys = {_norm(c["name"]) for c in from_state.get("characters", [])}
+    new_chars = [
+        c for c in to_state.get("characters", [])
+        if _norm(c["name"]) not in from_char_keys
+    ]
+
+    from_rel_keys: set[tuple[str, str]] = set()
+    for r in from_state.get("relationships", []):
+        a, b = _norm(r["character_a"]), _norm(r["character_b"])
+        from_rel_keys.add((min(a, b), max(a, b)))
+    new_rels = []
+    for r in to_state.get("relationships", []):
+        a, b = _norm(r["character_a"]), _norm(r["character_b"])
+        if (min(a, b), max(a, b)) not in from_rel_keys:
+            new_rels.append(r)
+
+    from_place_keys = {_norm(p["name"]) for p in from_state.get("places", [])}
+    new_places = [
+        p for p in to_state.get("places", [])
+        if _norm(p["name"]) not in from_place_keys
+    ]
+
+    from_event_keys = {_norm(e["description"]) for e in from_state.get("events", [])}
+    new_events = [
+        e for e in to_state.get("events", [])
+        if _norm(e["description"]) not in from_event_keys
+    ]
+
+    from_tm_keys = {_norm(t) for t in from_state.get("time_markers", [])}
+    new_tms = [
+        t for t in to_state.get("time_markers", [])
+        if _norm(t) not in from_tm_keys
+    ]
+
+    _MAX = 10  # max items per section
+
+    # --- Print ---
+    print(f"\nFiction Progress Diff")
+    print(f"Book: {book_id}")
+    print(f"From: {from_name}  →  To: {to_name}")
+    print("=" * 60)
+
+    any_changes = False
+
+    if new_chars:
+        any_changes = True
+        print(f"\nNew Characters ({len(new_chars)})")
+        print("─" * 40)
+        for c in new_chars[:_MAX]:
+            role_str = f" — {c['role']}" if c.get("role") else ""
+            print(f"  · {c['name']}{role_str}")
+        if len(new_chars) > _MAX:
+            print(f"  … and {len(new_chars) - _MAX} more")
+
+    if new_rels:
+        any_changes = True
+        print(f"\nNew Relationships ({len(new_rels)})")
+        print("─" * 40)
+        for r in new_rels[:_MAX]:
+            desc = f": {r['description']}" if r.get("description") else ""
+            print(f"  · {r['character_a']}  ↔  {r['character_b']}{desc}")
+        if len(new_rels) > _MAX:
+            print(f"  … and {len(new_rels) - _MAX} more")
+
+    if new_places:
+        any_changes = True
+        print(f"\nNew Places ({len(new_places)})")
+        print("─" * 40)
+        for p in new_places[:_MAX]:
+            desc = f" — {p['description']}" if p.get("description") else ""
+            print(f"  · {p['name']}{desc}")
+        if len(new_places) > _MAX:
+            print(f"  … and {len(new_places) - _MAX} more")
+
+    if new_events:
+        any_changes = True
+        print(f"\nNew Events ({len(new_events)})")
+        print("─" * 40)
+        for e in new_events[:_MAX]:
+            chars_str = f" ({', '.join(e['characters'])})" if e.get("characters") else ""
+            place_str = f" @ {e['place']}" if e.get("place") else ""
+            print(f"  · [{e.get('chapter', '?')}] {e['description']}{chars_str}{place_str}")
+        if len(new_events) > _MAX:
+            print(f"  … and {len(new_events) - _MAX} more")
+
+    if new_tms:
+        any_changes = True
+        print(f"\nNew Time Markers ({len(new_tms)})")
+        print("─" * 40)
+        for tm in new_tms[:_MAX]:
+            print(f"  · {tm}")
+        if len(new_tms) > _MAX:
+            print(f"  … and {len(new_tms) - _MAX} more")
+
+    if not any_changes:
+        print("\nNo new items between these two reading points.")
+
+    print()
