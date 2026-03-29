@@ -303,6 +303,24 @@
     .trace-loading { font-size: 0.9rem; color: var(--text3); padding: 10px 0; }
     .trace-error { font-size: 0.88rem; color: var(--error); padding: 6px 0; }
 
+    /* ── Fiction panel ───────────────────────────────────────────────── */
+    .fiction-badge {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #7c3aed;
+      background: #ede9fe;
+      border-radius: 6px;
+      padding: 2px 8px;
+      margin-bottom: 14px;
+    }
+    @media (prefers-color-scheme: dark) {
+      .fiction-badge { color: #c4b5fd; background: #2e1065; }
+    }
+    .fiction-row { display: flex; gap: 8px; margin-bottom: 12px; }
+    .fiction-row input { flex: 1; margin-bottom: 0; }
+    .fiction-row input.chapter-num { flex: 0 0 80px; }
+
     /* ── Inspect prev/next nav ───────────────────────────────────────── */
     .inspect-nav { display: flex; gap: 8px; margin-top: 10px; }
     .btn-nav {
@@ -344,10 +362,46 @@
       <div id="sections-list"><p class="hint">Loading…</p></div>
     </div>
 
-    <!-- 1. Trace -->
+    <!-- orchestrator validation failure test -->
+    <!-- 1. Fiction panel (shown only when fiction data available) -->
+    <div class="card" id="fiction-panel" style="display:none">
+      <div class="section-header">
+        <span class="badge" style="background:#7c3aed">1</span>
+        <h2 style="margin-bottom:0">Fiction mode</h2>
+      </div>
+      <span class="fiction-badge">Fiction mode available</span>
+      <p class="hint" style="margin-bottom:16px">
+        <strong>Who is this?</strong> — enter a chapter number and the character's name.<br>
+        <strong>What changed?</strong> — compare state from one chapter to another.
+      </p>
+
+      <!-- Who is this? -->
+      <label>Who is this character?</label>
+      <div class="fiction-row">
+        <input type="number" id="whois-chapter" class="chapter-num" placeholder="Current chapter" min="1">
+        <input type="text"   id="whois-character" placeholder="Character name">
+      </div>
+      <button class="btn-run" onclick="runWhois()">Who is this?</button>
+      <div class="output-wrap" id="whois-wrap">
+        <div class="output" id="whois-out"></div>
+      </div>
+
+      <!-- What changed? -->
+      <label style="margin-top:18px">What changed between chapters?</label>
+      <div class="fiction-row">
+        <input type="number" id="diff-from" class="chapter-num" placeholder="Compare from chapter">
+        <input type="number" id="diff-to"   class="chapter-num" placeholder="Compare to chapter">
+      </div>
+      <button class="btn-run" onclick="runDiff()">What changed?</button>
+      <div class="output-wrap" id="diff-wrap">
+        <div class="output" id="diff-out"></div>
+      </div>
+    </div>
+
+    <!-- 2. Trace -->
     <div class="card">
       <div class="section-header">
-        <span class="badge">1</span>
+        <span class="badge">2</span>
         <h2 style="margin-bottom:0">Trace an idea</h2>
       </div>
       <label for="trace-idea">Idea or concept</label>
@@ -358,10 +412,10 @@
       </div>
     </div>
 
-    <!-- 2. Explore -->
+    <!-- 3. Explore -->
     <div class="card">
       <div class="section-header">
-        <span class="badge">2</span>
+        <span class="badge">3</span>
         <h2 style="margin-bottom:0">Explore a section</h2>
       </div>
       <p class="hint">Tap a section above, or type a partial name.</p>
@@ -373,10 +427,10 @@
       </div>
     </div>
 
-    <!-- 3. Inspect window -->
+    <!-- 4. Inspect window -->
     <div class="card">
       <div class="section-header">
-        <span class="badge">3</span>
+        <span class="badge">4</span>
         <h2 style="margin-bottom:0">Inspect a window</h2>
       </div>
       <p class="hint">Tap a window in trace results, or enter section + number manually.</p>
@@ -393,6 +447,7 @@
         </div>
       </div>
     </div>
+
 
   </div><!-- /nav-panel -->
 
@@ -440,11 +495,12 @@
       document.getElementById('nav-panel').style.display = 'block';
       clearOutputs();
       loadSections(id);
+      checkFiction(id);
       window.scrollTo({ top: document.getElementById('nav-panel').offsetTop - 8, behavior: 'smooth' });
     }
 
     function clearOutputs() {
-      ['trace-wrap','explore-wrap','inspect-wrap'].forEach(id => {
+      ['trace-wrap','explore-wrap','inspect-wrap','whois-wrap','diff-wrap'].forEach(id => {
         document.getElementById(id).classList.remove('visible');
       });
       document.getElementById('inspect-nav').style.display = 'none';
@@ -472,6 +528,53 @@
       } catch (e) {
         list.innerHTML = '<p class="hint" style="color:var(--error)">Failed to load sections.</p>';
       }
+    }
+
+    /* ── Fiction availability ────────────────────────────────────────── */
+    async function checkFiction(id) {
+      try {
+        const r = await fetch(`/books/${encodeURIComponent(id)}/fiction/available`);
+        const d = await r.json();
+        document.getElementById('fiction-panel').style.display = d.available ? 'block' : 'none';
+      } catch (e) {
+        document.getElementById('fiction-panel').style.display = 'none';
+      }
+    }
+
+    /* ── Fiction: Who is this? ───────────────────────────────────────── */
+    async function runWhois() {
+      if (!bookId) return;
+      const chapter   = document.getElementById('whois-chapter').value.trim();
+      const character = document.getElementById('whois-character').value.trim();
+      if (!chapter || !character) {
+        setOutput('whois-wrap', 'whois-out', 'Enter both a chapter number and character name.', 'error');
+        return;
+      }
+      setOutput('whois-wrap', 'whois-out', 'Loading…', 'loading');
+      try {
+        const r = await fetch(`/books/${encodeURIComponent(bookId)}/fiction/whois?` +
+          new URLSearchParams({ chapter, character }));
+        const d = await r.json();
+        setOutput('whois-wrap', 'whois-out', r.ok ? d.output : (d.detail || d.error || d.message || 'Request failed.'), r.ok ? 'ok' : 'error');
+      } catch (e) { setOutput('whois-wrap', 'whois-out', 'Request failed: ' + e.message, 'error'); }
+    }
+
+    /* ── Fiction: What changed? ──────────────────────────────────────── */
+    async function runDiff() {
+      if (!bookId) return;
+      const from_chapter = document.getElementById('diff-from').value.trim();
+      const to_chapter   = document.getElementById('diff-to').value.trim();
+      if (!from_chapter || !to_chapter) {
+        setOutput('diff-wrap', 'diff-out', 'Enter both From and To chapter numbers.', 'error');
+        return;
+      }
+      setOutput('diff-wrap', 'diff-out', 'Loading…', 'loading');
+      try {
+        const r = await fetch(`/books/${encodeURIComponent(bookId)}/fiction/diff?` +
+          new URLSearchParams({ from_chapter, to_chapter }));
+        const d = await r.json();
+        setOutput('diff-wrap', 'diff-out', r.ok ? d.output : (d.detail || d.error || d.message || 'Request failed.'), r.ok ? 'ok' : 'error');
+      } catch (e) { setOutput('diff-wrap', 'diff-out', 'Request failed: ' + e.message, 'error'); }
     }
 
     function tapSection(idx) {
@@ -656,9 +759,11 @@
     document.addEventListener('keydown', e => {
       if (e.key !== 'Enter' || e.shiftKey) return;
       const id = e.target.id;
-      if (id === 'trace-idea')         runTrace();
-      else if (id === 'explore-section') runExplore();
+      if (id === 'trace-idea')                              runTrace();
+      else if (id === 'explore-section')                    runExplore();
       else if (id === 'inspect-section' || id === 'inspect-window-num') runInspect();
+      else if (id === 'whois-chapter' || id === 'whois-character')      runWhois();
+      else if (id === 'diff-from' || id === 'diff-to')                  runDiff();
     });
 
     /* ── Escaping helper for inline HTML ─────────────────────────────── */

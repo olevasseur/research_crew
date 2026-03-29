@@ -147,7 +147,31 @@ python -m pip install -r requirements.txt
 
 ---
 
-# 9. Future improvements
+# 9. RAG pipeline — running tests
+
+The RAG pipeline lives in `rag/` and `rag_cli.py`. Tests do not call the LLM or
+read any book data; they run entirely offline.
+
+Bootstrap (if `.venv` does not exist yet):
+
+    python3 -m venv .venv
+    source .venv/bin/activate
+    pip install -r requirements.txt
+
+Run tests (works whether or not `.venv` is active — use the Python on `PATH`):
+
+    python3 -m pytest tests/test_review_eval.py -v
+
+Or, if a venv is active:
+
+    python -m pytest tests/ -v
+
+Do **not** call `.venv/bin/pytest` directly; use `python -m pytest` so that the
+correct interpreter and installed packages are always used.
+
+---
+
+# 10. Future improvements
 
 Possible upgrades:
 

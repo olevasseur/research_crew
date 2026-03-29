@@ -185,6 +185,47 @@ def section_windows(
     return {"book_id": book_id, "section": section, "windows": ids}
 
 
+@app.get("/books/{book_id}/fiction/available", tags=["fiction"])
+def fiction_available(book_id: str):
+    """Return whether fiction extraction artifacts exist for this book."""
+    state_path = _results_dir(book_id) / "fiction_state.json"
+    if not state_path.exists():
+        return {"book_id": book_id, "available": False}
+    import json as _json
+    try:
+        state = _json.loads(state_path.read_text())
+        available = len(state) >= 10
+    except Exception:
+        available = False
+    return {"book_id": book_id, "available": available}
+
+
+@app.get("/books/{book_id}/fiction/whois", tags=["fiction"])
+def fiction_whois(
+    book_id: str,
+    chapter: int = Query(..., description="Chapter number (1-based)"),
+    character: str = Query(..., description="Character name"),
+):
+    """Character profile up to chapter N (spoiler-safe)."""
+    _require_book(book_id)
+    from rag.fiction import fiction_whois as _whois
+    output = _capture(_whois, book_id, _config, chapter_number=chapter, character_name=character)
+    return {"book_id": book_id, "output": output}
+
+
+@app.get("/books/{book_id}/fiction/diff", tags=["fiction"])
+def fiction_diff(
+    book_id: str,
+    from_chapter: int = Query(..., description="Start chapter (1-based)"),
+    to_chapter: int = Query(..., description="End chapter (1-based)"),
+):
+    """What changed between two reading points (spoiler-safe)."""
+    _require_book(book_id)
+    from rag.fiction import fiction_diff as _diff
+    output = _capture(_diff, book_id, _config, from_chapter=from_chapter, to_chapter=to_chapter)
+    return {"book_id": book_id, "output": output}
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
