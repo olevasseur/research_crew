@@ -4,6 +4,8 @@
 Usage:
     python rag_cli.py ingest <file>       [--title T] [--author A] [--book-id ID]
     python rag_cli.py ingest-folder <dir>
+    # Preferred format: EPUB (exact TOC, clean text, auto metadata).
+    # PDF is supported but best-effort (quality depends on the PDF).
     python rag_cli.py summarize <book_id> [--mode M] [--quality Q] [--section S] [--force] [--verify] [--no-verify]
     python rag_cli.py evaluate <book_id>  [--section S]
     python rag_cli.py review-eval <book_id>
@@ -263,7 +265,7 @@ def main():
 
     # --- ingest ---
     p_ingest = sub.add_parser("ingest", help="Ingest a single book")
-    p_ingest.add_argument("file", help="Path to book file (PDF, txt, md)")
+    p_ingest.add_argument("file", help="Path to book file (EPUB preferred; PDF/txt/md also supported)")
     p_ingest.add_argument("--title", default=None)
     p_ingest.add_argument("--author", default=None)
     p_ingest.add_argument("--book-id", dest="book_id", default=None)
@@ -394,7 +396,7 @@ def main():
 
     # --- inspect-structure ---
     p_struct = sub.add_parser("inspect-structure", help="Dry-run structure detection on a file")
-    p_struct.add_argument("file", help="Path to book file (PDF, txt, md)")
+    p_struct.add_argument("file", help="Path to book file (EPUB preferred; PDF/txt/md also supported)")
     p_struct.add_argument("--debug", action="store_true", help="Show all candidates and rejections")
     p_struct.set_defaults(func=cmd_inspect_structure)
 

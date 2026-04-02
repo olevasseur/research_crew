@@ -778,6 +778,8 @@ def _force_split_and_append(
         while pos < len(text):
             chunk_end = min(pos + max_size, len(text))
             result.append({"text": text[pos:chunk_end], "start": start + pos, "end": start + chunk_end})
+            if chunk_end >= len(text):
+                break
             pos = chunk_end - config.overlap if config.overlap else chunk_end
         return
 

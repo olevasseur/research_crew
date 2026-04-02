@@ -152,6 +152,10 @@ python -m pip install -r requirements.txt
 The RAG pipeline lives in `rag/` and `rag_cli.py`. Tests do not call the LLM or
 read any book data; they run entirely offline.
 
+**Preferred ingest format:** EPUB — gives exact chapter structure, clean text,
+and auto-detected title/author. PDF is supported but best-effort (quality
+depends on the PDF).
+
 Bootstrap (if `.venv` does not exist yet):
 
     python3 -m venv .venv
