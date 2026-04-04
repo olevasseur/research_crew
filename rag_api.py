@@ -2,7 +2,8 @@
 """Local HTTP API for RAG book navigation.
 
 Thin wrapper over the existing navigation primitives.
-All endpoints are read-only and make no LLM calls.
+Navigation endpoints are read-only and make no LLM calls.
+Reading-state endpoints (GET/POST) write a small local JSON file.
 
 Run with:
     python rag_api.py
@@ -173,16 +174,197 @@ def list_sections(book_id: str):
 def section_windows(
     book_id: str,
     section: str = Query(..., description="Section name"),
+    all: bool = Query(False, description="If true, return all windows including non-selected ones"),
 ):
-    """Return sorted 1-based window indices available for a section."""
+    """Return sorted 1-based window indices available for a section.
+
+    By default returns only selected (summarised) windows. Pass all=true to
+    include every window the section was split into, including those that were
+    below the summarisation budget.
+    """
     _require_book(book_id)
+    if all:
+        sel_path = _results_dir(book_id) / "selection_detail.json"
+        if not sel_path.exists():
+            return {"book_id": book_id, "section": section, "windows": [], "all": True}
+        sel_data = json.loads(sel_path.read_text())
+        raw = sel_data.get(section, [])
+        ids = sorted(w["index"] + 1 for w in raw if isinstance(w.get("index"), int))
+        return {"book_id": book_id, "section": section, "windows": ids, "all": True}
     windows_path = _results_dir(book_id) / "window_summaries.json"
     if not windows_path.exists():
-        return {"book_id": book_id, "section": section, "windows": []}
+        return {"book_id": book_id, "section": section, "windows": [], "all": False}
     window_data = json.loads(windows_path.read_text())
     raw = window_data.get(section, [])
     ids = sorted(w["window"] + 1 for w in raw if isinstance(w.get("window"), int))
-    return {"book_id": book_id, "section": section, "windows": ids}
+    return {"book_id": book_id, "section": section, "windows": ids, "all": False}
+
+
+# ---------------------------------------------------------------------------
+# Reading state  (persisted to data/reading_state.json)
+# ---------------------------------------------------------------------------
+
+def _reading_state_path() -> Path:
+    return Path(_config.storage.results_directory).parent / "reading_state.json"
+
+
+def _load_all_reading_state() -> dict:
+    p = _reading_state_path()
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text())
+    except Exception:
+        return {}
+
+
+def _save_all_reading_state(state: dict) -> None:
+    p = _reading_state_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(state, indent=2))
+
+
+@app.get("/books/{book_id}/reading-state", tags=["reading"])
+def get_reading_state(book_id: str):
+    """Return reading progress for a book: read windows, last-read position, bookmarks, and saved items."""
+    state = _load_all_reading_state().get(book_id, {})
+    return {
+        "book_id": book_id,
+        "read_windows": state.get("read_windows", []),
+        "last_read_window": state.get("last_read_window"),
+        "last_read_section": state.get("last_read_section"),
+        "bookmarks": state.get("bookmarks", []),
+        "saved_items": state.get("saved_items", []),
+    }
+
+
+@app.post("/books/{book_id}/reading-state/mark", tags=["reading"])
+def mark_window_read(
+    book_id: str,
+    window: int = Query(..., description="1-based window number"),
+    section: str | None = Query(None, description="Section name"),
+):
+    """Mark a window as read and update last-read position. Returns updated state."""
+    all_state = _load_all_reading_state()
+    state = all_state.setdefault(
+        book_id,
+        {"read_windows": [], "last_read_window": None, "last_read_section": None},
+    )
+    if window not in state["read_windows"]:
+        state["read_windows"].append(window)
+        state["read_windows"].sort()
+    state["last_read_window"] = window
+    if section:
+        state["last_read_section"] = section
+    _save_all_reading_state(all_state)
+    return {
+        "book_id": book_id,
+        "read_windows": state["read_windows"],
+        "last_read_window": state["last_read_window"],
+        "last_read_section": state.get("last_read_section"),
+        "bookmarks": state.get("bookmarks", []),
+    }
+
+
+@app.post("/books/{book_id}/reading-state/bookmark", tags=["reading"])
+def toggle_bookmark(
+    book_id: str,
+    window: int = Query(..., description="1-based window number"),
+    section: str | None = Query(None, description="Section name"),
+):
+    """Toggle a bookmark for a window. Adds if absent, removes if present."""
+    all_state = _load_all_reading_state()
+    state = all_state.setdefault(
+        book_id,
+        {"read_windows": [], "last_read_window": None, "last_read_section": None, "bookmarks": []},
+    )
+    if "bookmarks" not in state:
+        state["bookmarks"] = []
+
+    existing = next((i for i, b in enumerate(state["bookmarks"]) if b["window"] == window), None)
+    if existing is not None:
+        state["bookmarks"].pop(existing)
+        action = "removed"
+    else:
+        bm: dict = {"window": window}
+        if section:
+            bm["section"] = section
+        state["bookmarks"].append(bm)
+        action = "added"
+
+    _save_all_reading_state(all_state)
+    return {
+        "book_id": book_id,
+        "action": action,
+        "bookmarks": state["bookmarks"],
+        "read_windows": state.get("read_windows", []),
+        "last_read_window": state.get("last_read_window"),
+        "last_read_section": state.get("last_read_section"),
+    }
+
+
+@app.post("/books/{book_id}/reading-state/save", tags=["reading"])
+def toggle_saved_item(
+    book_id: str,
+    window: int = Query(..., description="1-based window number"),
+    section: str | None = Query(None, description="Section name"),
+    preview: str | None = Query(None, description="Short text snippet from the window"),
+):
+    """Toggle a saved item for a window. Adds if absent, removes if present."""
+    all_state = _load_all_reading_state()
+    state = all_state.setdefault(
+        book_id,
+        {"read_windows": [], "last_read_window": None, "last_read_section": None,
+         "bookmarks": [], "saved_items": []},
+    )
+    if "saved_items" not in state:
+        state["saved_items"] = []
+
+    existing = next(
+        (i for i, s in enumerate(state["saved_items"]) if s["window"] == window), None
+    )
+    if existing is not None:
+        state["saved_items"].pop(existing)
+        action = "removed"
+    else:
+        item: dict = {"window": window}
+        if section:
+            item["section"] = section
+        if preview:
+            item["preview"] = preview[:200]
+        registry_path = Path(_config.vectorstore.persist_directory) / "books.json"
+        if registry_path.exists():
+            try:
+                registry = json.loads(registry_path.read_text())
+                title = registry.get(book_id, {}).get("title")
+                if title:
+                    item["title"] = title
+            except Exception:
+                pass
+        state["saved_items"].append(item)
+        action = "added"
+
+    _save_all_reading_state(all_state)
+    return {
+        "book_id": book_id,
+        "action": action,
+        "saved_items": state["saved_items"],
+        "read_windows": state.get("read_windows", []),
+        "last_read_window": state.get("last_read_window"),
+        "last_read_section": state.get("last_read_section"),
+        "bookmarks": state.get("bookmarks", []),
+    }
+
+
+@app.get("/saved-items", tags=["reading"])
+def all_saved_items():
+    """Return all saved items across all books, for cross-book idea collection."""
+    all_state = _load_all_reading_state()
+    result = []
+    for bid, state in all_state.items():
+        for item in state.get("saved_items", []):
+            result.append({"book_id": bid, **item})
+    return {"saved_items": result, "total": len(result)}
 
 
 @app.get("/books/{book_id}/fiction/available", tags=["fiction"])

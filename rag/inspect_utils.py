@@ -301,6 +301,22 @@ def inspect_summary(book_id: str, config: RAGConfig) -> None:
             print(f"  {name}: not yet generated")
 
 
+def _find_leading_overlap(prev_text: str, curr_text: str) -> int:
+    """Return the number of leading chars in curr_text that repeat the tail of prev_text.
+
+    Scans suffixes of prev_text (up to 400 chars back) looking for one that is
+    a prefix of curr_text.  Returns 0 if no overlap >= 20 chars is found.
+    """
+    if not prev_text or not curr_text:
+        return 0
+    search_start = max(0, len(prev_text) - 400)
+    for start in range(search_start, len(prev_text) - 20):
+        suffix = prev_text[start:]
+        if curr_text.startswith(suffix):
+            return len(suffix)
+    return 0
+
+
 def inspect_window(
     book_id: str,
     window_id: int,
@@ -358,6 +374,25 @@ def inspect_window(
         for ws in windows:
             if ws.get("window") == target_idx:
                 candidates.append((sec_name, ws))
+
+    is_summarised = True
+    if not candidates:
+        # Fallback: look in selection_detail.json for non-selected windows
+        if section:
+            sel_sections = {s: sel_data[s] for s in sel_data if norm in _norm(s)}
+        else:
+            sel_sections = sel_data
+        for sec_name, sel_windows in sel_sections.items():
+            for sel_w in sel_windows:
+                if sel_w.get("index") == target_idx:
+                    candidates.append((sec_name, {
+                        "window": target_idx,
+                        "chunk_ids": sel_w.get("chunk_ids", []),
+                        "score": sel_w.get("scores", {}).get("composite", 0),
+                        "labels": sel_w.get("content_labels", []),
+                        "summary": "",
+                    }))
+        is_summarised = False
 
     if not candidates:
         print(f"Window {window_id} not found in '{book_id}'.")
@@ -427,23 +462,53 @@ def inspect_window(
     print(f"  Tags:  {labels_str}")
     print(f"  Score: {score:.3f}")
 
+    # --- Find previous window's last chunk for inter-window overlap dedup ---
+    prev_last_text = ""
+    if target_idx > 0:
+        prev_idx = target_idx - 1
+        prev_chunk_ids: list[str] = []
+        for sec_ws in window_data.get(found_sec, []):
+            if sec_ws.get("window") == prev_idx:
+                prev_chunk_ids = sec_ws.get("chunk_ids", [])
+                break
+        if not prev_chunk_ids:
+            for sel_w in sel_data.get(found_sec, []):
+                if sel_w.get("index") == prev_idx:
+                    prev_chunk_ids = sel_w.get("chunk_ids", [])
+                    break
+        if prev_chunk_ids:
+            last_prev = chunk_map.get(prev_chunk_ids[-1])
+            if last_prev:
+                prev_last_text = last_prev.get("text", "")
+
     # --- Summary ---
     print(f"\n{'─' * 70}")
-    print(f"\n  [Summary]")
-    for line in found_ws.get("summary", "").strip().split("\n"):
-        print(f"  {line}")
+    if is_summarised and found_ws.get("summary", "").strip():
+        print(f"\n  [Summary]")
+        for line in found_ws["summary"].strip().split("\n"):
+            print(f"  {line}")
+    else:
+        print(f"\n  [Full text — not summarised]")
 
     # --- Full text ---
     print(f"\n{'─' * 70}")
     print(f"\n  [Full Text]")
-    for cid in chunk_ids:
+    prev_display_text = prev_last_text
+    for i, cid in enumerate(chunk_ids):
         chunk = chunk_map.get(cid)
         if chunk:
+            text = chunk.get("text", "")
+            skip = _find_leading_overlap(prev_display_text, text) if prev_display_text else 0
             print(f"\n  --- {cid}  (p.{chunk.get('page_range', '?')}) ---\n")
-            for line in chunk.get("text", "").split("\n"):
+            if i == 0 and skip > 0 and prev_last_text:
+                print(f"  ↑ continued from window {target_idx}  ({skip} chars overlap skipped)\n")
+            display_text = text[skip:].lstrip("\n") if skip else text
+            for line in display_text.split("\n"):
                 print(f"  {line}")
+            prev_display_text = text
         else:
             print(f"\n  --- {cid}  (not found in vectorstore) ---")
+            prev_display_text = ""
 
     # --- Context ---
     print(f"\n{'─' * 70}")

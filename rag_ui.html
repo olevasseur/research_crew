@@ -321,6 +321,21 @@
     .fiction-row input { flex: 1; margin-bottom: 0; }
     .fiction-row input.chapter-num { flex: 0 0 80px; }
 
+    /* ── Window mode toggle ─────────────────────────────────────────── */
+    #btn-window-mode {
+      font-size: 0.78rem;
+      padding: 5px 11px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      color: var(--text2);
+      cursor: pointer;
+      font-family: inherit;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    #btn-window-mode:active { background: var(--bg3); }
+    #btn-window-mode.all-mode { border-color: var(--accent); color: var(--accent); }
+
     /* ── Inspect prev/next nav ───────────────────────────────────────── */
     .inspect-nav { display: flex; gap: 8px; margin-top: 10px; }
     .btn-nav {
@@ -338,6 +353,168 @@
     }
     .btn-nav:active { background: var(--bg3); }
     .btn-nav:disabled { opacity: 0.35; cursor: default; }
+
+    /* ── Reading state ───────────────────────────────────────────────── */
+    /* Bookmarks */
+    #bookmarks-panel { display: none; margin-bottom: 14px; }
+    #bookmarks-panel.has-bookmarks { display: block; }
+    .bookmarks-heading {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 7px;
+    }
+    .bookmark-item {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      width: 100%;
+      padding: 9px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 6px;
+      font: inherit;
+      font-size: 0.85rem;
+      cursor: pointer;
+      color: var(--text);
+      text-align: left;
+    }
+    .bookmark-item:last-child { margin-bottom: 0; }
+    .bookmark-item:active { background: var(--bg3); }
+    .bookmark-win { font-weight: 700; color: var(--accent); flex-shrink: 0; }
+    .bookmark-sec { color: var(--text2); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #bookmark-btn {
+      flex: 1;
+      padding: 13px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      color: var(--text);
+      text-align: center;
+      font-family: inherit;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    #bookmark-btn:active { background: var(--bg3); }
+    #bookmark-btn.is-bookmarked { border-color: #d97706; color: #d97706; }
+    @media (prefers-color-scheme: dark) {
+      #bookmark-btn.is-bookmarked { border-color: #fbbf24; color: #fbbf24; }
+    }
+
+    /* ── Saved items ─────────────────────────────────────────────────── */
+    #saved-panel { display: none; margin-bottom: 14px; }
+    #saved-panel.has-saved { display: block; }
+    .saved-heading {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 7px;
+    }
+    .saved-item {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      width: 100%;
+      padding: 9px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-bottom: 6px;
+      font: inherit;
+      font-size: 0.85rem;
+      cursor: pointer;
+      color: var(--text);
+      text-align: left;
+    }
+    .saved-item:last-child { margin-bottom: 0; }
+    .saved-item:active { background: var(--bg3); }
+    .saved-win { font-weight: 700; color: #16a34a; flex-shrink: 0; }
+    .saved-sec { color: var(--text2); font-size: 0.8rem; white-space: nowrap; flex-shrink: 0; }
+    .saved-preview { color: var(--text3); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+    @media (prefers-color-scheme: dark) {
+      .saved-win { color: #4ade80; }
+    }
+    #save-btn {
+      flex: 1;
+      padding: 13px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+      color: var(--text);
+      text-align: center;
+      font-family: inherit;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    #save-btn:active { background: var(--bg3); }
+    #save-btn.is-saved { border-color: #16a34a; color: #16a34a; }
+    @media (prefers-color-scheme: dark) {
+      #save-btn.is-saved { border-color: #4ade80; color: #4ade80; }
+    }
+
+    /* ── Ideas panel (cross-book) ────────────────────────────────────── */
+    .idea-item {
+      display: block;
+      width: 100%;
+      padding: 11px 14px;
+      margin-bottom: 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      text-align: left;
+      cursor: pointer;
+      color: var(--text);
+      font: inherit;
+      transition: border-color 0.15s;
+    }
+    .idea-item:last-child { margin-bottom: 0; }
+    .idea-item:active { background: var(--bg3); }
+    .idea-hd { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 2px; }
+    .idea-book { font-size: 0.9rem; font-weight: 600; flex: 1; min-width: 0; }
+    .idea-win  { font-size: 0.75rem; font-weight: 700; color: var(--accent); flex-shrink: 0; }
+    .idea-sec  { font-size: 0.78rem; color: var(--text2); flex-shrink: 0; }
+    .idea-preview {
+      font-size: 0.8rem; color: var(--text3); line-height: 1.45;
+      overflow: hidden; text-overflow: ellipsis;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    }
+
+    #resume-btn {
+      display: none;
+      width: 100%;
+      padding: 11px 14px;
+      margin-bottom: 14px;
+      background: var(--bg);
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      text-align: left;
+      cursor: pointer;
+      color: var(--accent);
+      font-size: 0.88rem;
+      font-weight: 500;
+      font-family: inherit;
+    }
+    #resume-btn:active { background: var(--bg2); }
+    .read-badge {
+      display: none;
+      font-size: 0.72rem;
+      color: #16a34a;
+      font-weight: 600;
+      margin-left: 10px;
+      vertical-align: middle;
+    }
+    @media (prefers-color-scheme: dark) {
+      .read-badge { color: #4ade80; }
+    }
   </style>
 </head>
 <body>
@@ -351,10 +528,30 @@
     <div id="book-list"><p class="hint">Loading…</p></div>
   </div>
 
+  <!-- ── Ideas: cross-book saved windows ──────────────────────────── -->
+  <div class="card" id="ideas-card" style="display:none">
+    <h2>Ideas</h2>
+    <p class="hint" id="ideas-empty">Save windows while reading to collect ideas across books.</p>
+    <div id="ideas-list"></div>
+  </div>
+
   <!-- ── Navigation panel ───────────────────────────────────────────── -->
   <div id="nav-panel">
 
     <span id="selected-label"></span>
+    <button id="resume-btn" onclick="resumeReading()"></button>
+
+    <!-- Bookmarks (shown when at least one exists) -->
+    <div id="bookmarks-panel">
+      <div class="bookmarks-heading">Bookmarks</div>
+      <div id="bookmarks-list"></div>
+    </div>
+
+    <!-- Saved windows (shown when at least one exists) -->
+    <div id="saved-panel">
+      <div class="saved-heading">Saved windows</div>
+      <div id="saved-list"></div>
+    </div>
 
     <!-- 0. Sections list -->
     <div class="card">
@@ -437,12 +634,20 @@
       <input type="text" id="inspect-section" placeholder="e.g. Chapter 4: Spend Time Alone">
       <label for="inspect-window-num">Window number</label>
       <input type="number" id="inspect-window-num" placeholder="e.g. 2" min="1">
-      <button class="btn-run" onclick="runInspect()">Inspect Window</button>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <span style="font-size:0.82rem;color:var(--text2)">Windows:</span>
+        <button id="btn-window-mode" onclick="toggleWindowMode()">Selected only</button>
+      </div>
+      <button class="btn-run" onclick="runInspect()">Inspect Window<span class="read-badge" id="read-badge">✓ read</span></button>
       <div class="output-wrap" id="inspect-wrap">
         <div class="output" id="inspect-out"></div>
         <div class="inspect-nav" id="inspect-nav" style="display:none">
           <button class="btn-nav" id="btn-prev" onclick="inspectStep(-1)" disabled>← Prev</button>
           <button class="btn-nav" id="btn-next" onclick="inspectStep(1)" disabled>Next →</button>
+        </div>
+        <div class="inspect-nav" id="bookmark-nav" style="display:none">
+          <button id="bookmark-btn" onclick="toggleBookmark()">☆ Bookmark</button>
+          <button id="save-btn" onclick="toggleSave()">+ Save window</button>
         </div>
       </div>
     </div>
@@ -463,6 +668,13 @@
     let _inspectWins = [];
     let _inspectSection = null;
     let _inspectCurrent = null;
+    let _inspectAllWindows = false;
+
+    // Reading state (includes bookmarks and saved items)
+    let _readState = { read_windows: [], last_read_window: null, last_read_section: null, bookmarks: [], saved_items: [] };
+
+    // Preview text from last inspect result (used when saving a window)
+    let _inspectPreview = null;
 
     /* ── Books ───────────────────────────────────────────────────────── */
     async function loadBooks() {
@@ -475,7 +687,7 @@
           return;
         }
         el.innerHTML = d.books.map(b => `
-          <button class="book-btn" onclick="selectBook('${esc(b.book_id)}', this)">
+          <button class="book-btn" data-book-id="${esc(b.book_id)}" onclick="selectBook('${esc(b.book_id)}', this)">
             <span class="book-title">${esc(b.title || b.book_id)}</span>
             ${b.author ? `<span class="book-author">${esc(b.author)}</span>` : ''}
             ${b.total_pages ? `<span class="book-meta">${b.total_pages} pages · ${b.total_chunks || '?'} chunks</span>` : ''}
@@ -489,12 +701,13 @@
       bookId = id;
       _traceData = null;
       document.querySelectorAll('.book-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+      if (btn) btn.classList.add('active');
       document.getElementById('selected-label').textContent = '📖 ' + id;
       document.getElementById('nav-panel').style.display = 'block';
       clearOutputs();
       loadSections(id);
       checkFiction(id);
+      loadReadingState(id);
       window.scrollTo({ top: document.getElementById('nav-panel').offsetTop - 8, behavior: 'smooth' });
     }
 
@@ -503,6 +716,221 @@
         document.getElementById(id).classList.remove('visible');
       });
       document.getElementById('inspect-nav').style.display = 'none';
+      document.getElementById('bookmark-nav').style.display = 'none';
+      document.getElementById('read-badge').style.display = 'none';
+    }
+
+    /* ── Reading state ───────────────────────────────────────────────── */
+    async function loadReadingState(id) {
+      try {
+        const r = await fetch(`/books/${encodeURIComponent(id)}/reading-state`);
+        if (r.ok) { _readState = await r.json(); } else { _readState = {}; }
+      } catch (e) { _readState = {}; }
+      updateResumeBtn();
+      renderBookmarkList();
+      renderSavedList();
+    }
+
+    function updateResumeBtn() {
+      const btn = document.getElementById('resume-btn');
+      const lrw = _readState.last_read_window;
+      if (lrw) {
+        const sec = _readState.last_read_section ? ` · ${_readState.last_read_section}` : '';
+        btn.textContent = `▶ Resume: window ${lrw}${sec}`;
+        btn.style.display = 'block';
+      } else {
+        btn.style.display = 'none';
+      }
+    }
+
+    function resumeReading() {
+      const lrw = _readState.last_read_window;
+      if (!lrw) return;
+      if (_readState.last_read_section) {
+        document.getElementById('inspect-section').value = _readState.last_read_section;
+      }
+      document.getElementById('inspect-window-num').value = lrw;
+      runInspect();
+      document.getElementById('inspect-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    async function markRead(win, section) {
+      if (!bookId || !win) return;
+      try {
+        const params = new URLSearchParams({ window: win });
+        if (section) params.set('section', section);
+        const r = await fetch(
+          `/books/${encodeURIComponent(bookId)}/reading-state/mark?` + params,
+          { method: 'POST' }
+        );
+        if (r.ok) {
+          _readState = await r.json();
+          updateResumeBtn();
+          updateReadBadge(win);
+        }
+      } catch (e) {}
+    }
+
+    function updateReadBadge(win) {
+      const badge = document.getElementById('read-badge');
+      const reads = (_readState.read_windows || []);
+      badge.style.display = reads.includes(win) ? 'inline' : 'none';
+    }
+
+    /* ── Bookmarks ───────────────────────────────────────────────────── */
+    function updateBookmarkBtn(win) {
+      const btn  = document.getElementById('bookmark-btn');
+      const bnav = document.getElementById('bookmark-nav');
+      if (!win) return;
+      const isBookmarked = (_readState.bookmarks || []).some(b => b.window === win);
+      btn.textContent = isBookmarked ? '★ Bookmarked' : '☆ Bookmark';
+      btn.classList.toggle('is-bookmarked', isBookmarked);
+      bnav.style.display = 'flex';
+    }
+
+    async function toggleBookmark() {
+      if (!bookId) return;
+      const win = parseInt(document.getElementById('inspect-window-num').value, 10);
+      const section = document.getElementById('inspect-section').value.trim() || null;
+      if (!win) return;
+      try {
+        const params = new URLSearchParams({ window: win });
+        if (section) params.set('section', section);
+        const r = await fetch(
+          `/books/${encodeURIComponent(bookId)}/reading-state/bookmark?` + params,
+          { method: 'POST' }
+        );
+        if (r.ok) {
+          _readState = await r.json();
+          updateBookmarkBtn(win);
+          renderBookmarkList();
+        }
+      } catch (e) {}
+    }
+
+    function renderBookmarkList() {
+      const panel = document.getElementById('bookmarks-panel');
+      const list  = document.getElementById('bookmarks-list');
+      const bms   = (_readState.bookmarks || []);
+      if (bms.length === 0) { panel.classList.remove('has-bookmarks'); return; }
+      panel.classList.add('has-bookmarks');
+      list.innerHTML = bms.map(b => {
+        const secStr = b.section || '';
+        const secHtml = secStr
+          ? `<span class="bookmark-sec">${esc(secStr)}</span>`
+          : '';
+        return `<button class="bookmark-item" onclick="openBookmark(${b.window},${JSON.stringify(secStr)})">` +
+          `<span class="bookmark-win">W${b.window}</span>${secHtml}</button>`;
+      }).join('');
+    }
+
+    function openBookmark(win, section) {
+      if (section) document.getElementById('inspect-section').value = section;
+      document.getElementById('inspect-window-num').value = win;
+      runInspect();
+      document.getElementById('inspect-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    /* ── Saved windows ───────────────────────────────────────────────── */
+    function updateSaveBtn(win) {
+      const btn = document.getElementById('save-btn');
+      if (!win) return;
+      const isSaved = (_readState.saved_items || []).some(s => s.window === win);
+      btn.textContent = isSaved ? '★ Saved' : '+ Save window';
+      btn.classList.toggle('is-saved', isSaved);
+    }
+
+    async function toggleSave() {
+      if (!bookId) return;
+      const win     = parseInt(document.getElementById('inspect-window-num').value, 10);
+      const section = document.getElementById('inspect-section').value.trim() || null;
+      if (!win) return;
+      try {
+        const params = new URLSearchParams({ window: win });
+        if (section) params.set('section', section);
+        if (_inspectPreview) params.set('preview', _inspectPreview.slice(0, 200));
+        const r = await fetch(
+          `/books/${encodeURIComponent(bookId)}/reading-state/save?` + params,
+          { method: 'POST' }
+        );
+        if (r.ok) {
+          _readState = await r.json();
+          updateSaveBtn(win);
+          renderSavedList();
+          loadIdeas();
+        }
+      } catch (e) {}
+    }
+
+    function renderSavedList() {
+      const panel = document.getElementById('saved-panel');
+      const list  = document.getElementById('saved-list');
+      const items = (_readState.saved_items || []);
+      if (items.length === 0) { panel.classList.remove('has-saved'); return; }
+      panel.classList.add('has-saved');
+      list.innerHTML = items.map(s => {
+        const secStr     = s.section || '';
+        const previewStr = s.preview ? s.preview.slice(0, 80) : '';
+        const secHtml     = secStr     ? `<span class="saved-sec">${esc(secStr)}</span>` : '';
+        const previewHtml = previewStr ? `<span class="saved-preview">${esc(previewStr)}…</span>` : '';
+        return `<button class="saved-item" onclick="openSaved(${s.window},${JSON.stringify(secStr)})">` +
+          `<span class="saved-win">W${s.window}</span>${secHtml}${previewHtml}</button>`;
+      }).join('');
+    }
+
+    function openSaved(win, section) {
+      if (section) document.getElementById('inspect-section').value = section;
+      document.getElementById('inspect-window-num').value = win;
+      runInspect();
+      document.getElementById('inspect-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    /* ── Ideas: cross-book saved windows ────────────────────────────── */
+    async function loadIdeas() {
+      try {
+        const r = await fetch('/saved-items');
+        if (!r.ok) return;
+        const d = await r.json();
+        renderIdeas(d.saved_items || []);
+      } catch (e) {}
+    }
+
+    function renderIdeas(items) {
+      const card  = document.getElementById('ideas-card');
+      const empty = document.getElementById('ideas-empty');
+      const list  = document.getElementById('ideas-list');
+      if (items.length === 0) {
+        card.style.display = 'none';
+        list.innerHTML = '';
+        return;
+      }
+      card.style.display = 'block';
+      empty.style.display = 'none';
+      list.innerHTML = items.map(item => {
+        const titleStr   = item.title   || item.book_id;
+        const sectionStr = item.section || '';
+        const previewStr = item.preview ? item.preview.slice(0, 120) : '';
+        const secHtml     = sectionStr   ? `<span class="idea-sec">${esc(sectionStr)}</span>` : '';
+        const previewHtml = previewStr   ? `<div class="idea-preview">${esc(previewStr)}…</div>` : '';
+        return `<button class="idea-item" onclick="openFromIdeas(${JSON.stringify(item.book_id)},${item.window},${JSON.stringify(sectionStr)})">` +
+          `<div class="idea-hd"><span class="idea-book">${esc(titleStr)}</span>` +
+          `<span class="idea-win">W${item.window}</span>${secHtml}</div>` +
+          `${previewHtml}</button>`;
+      }).join('');
+    }
+
+    function openFromIdeas(bid, win, sec) {
+      if (bid !== bookId) {
+        let found = null;
+        document.querySelectorAll('.book-btn').forEach(b => {
+          if (b.getAttribute('data-book-id') === bid) found = b;
+        });
+        selectBook(bid, found);
+      }
+      if (sec) document.getElementById('inspect-section').value = sec;
+      document.getElementById('inspect-window-num').value = win;
+      runInspect();
+      document.getElementById('inspect-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     /* ── Sections list (Feature 1) ───────────────────────────────────── */
@@ -708,14 +1136,20 @@
       if (!win) { setOutput('inspect-wrap','inspect-out','Please enter a window number.','error'); return; }
       setOutput('inspect-wrap','inspect-out','Loading…','loading');
       document.getElementById('inspect-nav').style.display = 'none';
+      document.getElementById('read-badge').style.display = 'none';
       try {
         const params = new URLSearchParams({ window: win });
         if (section) params.set('section', section);
         const r = await fetch(`/books/${encodeURIComponent(bookId)}/inspect-window?` + params);
         const d = await r.json();
         setOutput('inspect-wrap','inspect-out', r.ok ? d.output : (d.detail || 'Error'), r.ok ? 'ok' : 'error');
-        if (r.ok && section) {
-          loadInspectNav(section, parseInt(win, 10));
+        if (r.ok) {
+          const winNum = parseInt(win, 10);
+          _inspectPreview = d.output ? d.output.slice(0, 200) : null;
+          markRead(winNum, section || null);
+          updateBookmarkBtn(winNum);
+          updateSaveBtn(winNum);
+          if (section) loadInspectNav(section, winNum);
         }
       } catch (e) { setOutput('inspect-wrap','inspect-out','Request failed: ' + e.message,'error'); }
     }
@@ -725,14 +1159,25 @@
       _inspectSection = section;
       _inspectCurrent = currentWin;
       try {
-        const r = await fetch(`/books/${encodeURIComponent(bookId)}/section-windows?` +
-          new URLSearchParams({ section }));
+        const params = new URLSearchParams({ section });
+        if (_inspectAllWindows) params.set('all', 'true');
+        const r = await fetch(`/books/${encodeURIComponent(bookId)}/section-windows?` + params);
         const d = await r.json();
         _inspectWins = d.windows || [];
         renderInspectNav(currentWin);
       } catch (e) {
         document.getElementById('inspect-nav').style.display = 'none';
       }
+    }
+
+    function toggleWindowMode() {
+      _inspectAllWindows = !_inspectAllWindows;
+      const btn = document.getElementById('btn-window-mode');
+      btn.textContent = _inspectAllWindows ? 'Show all' : 'Selected only';
+      btn.classList.toggle('all-mode', _inspectAllWindows);
+      const section = document.getElementById('inspect-section').value.trim();
+      const win = parseInt(document.getElementById('inspect-window-num').value, 10);
+      if (section && win) loadInspectNav(section, win);
     }
 
     function renderInspectNav(currentWin) {
@@ -773,6 +1218,7 @@
     }
 
     loadBooks();
+    loadIdeas();
   </script>
 </body>
 </html>
