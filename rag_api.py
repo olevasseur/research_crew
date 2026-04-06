@@ -19,7 +19,7 @@ import io
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 _UI_HTML = (Path(__file__).parent / "rag_ui.html").read_text()
@@ -153,6 +153,192 @@ def inspect_window(
     return {"book_id": book_id, "window": window, "section": section, "output": output}
 
 
+@app.get("/books/{book_id}/ideas", tags=["navigation"])
+def book_ideas(book_id: str):
+    """Return generated + user-authored idea items for a book."""
+    _require_book(book_id)
+    from rag.inspect_utils import extract_book_ideas
+    generated = extract_book_ideas(book_id, _config)
+    for g in generated:
+        g["source"] = "generated"
+    user = _load_all_reading_state().get(book_id, {}).get("user_ideas", [])
+    for u in user:
+        u["source"] = "user"
+    ideas = generated + user
+    return {"book_id": book_id, "ideas": ideas, "total": len(ideas)}
+
+
+@app.post("/books/{book_id}/ideas", tags=["navigation"])
+def add_user_idea(
+    book_id: str,
+    type: str = Query(..., description="key_idea, example, or framework"),
+    text: str = Query(..., description="Idea text"),
+    section: str = Query("", description="Source section"),
+):
+    """Add a user-authored idea for a book."""
+    if type not in ("key_idea", "example", "framework"):
+        raise HTTPException(status_code=400, detail="type must be key_idea, example, or framework")
+    all_state = _load_all_reading_state()
+    state = all_state.setdefault(book_id, {})
+    ideas = state.setdefault("user_ideas", [])
+    next_id = max((i.get("id", -1) for i in ideas), default=-1) + 1
+    idea = {"type": type, "text": text, "section": section, "id": next_id}
+    ideas.append(idea)
+    _save_all_reading_state(all_state)
+    return {"book_id": book_id, "idea": idea, "total_user_ideas": len(ideas)}
+
+
+@app.delete("/books/{book_id}/ideas/{idea_id}", tags=["navigation"])
+def delete_user_idea(book_id: str, idea_id: int):
+    """Delete a user-authored idea by its id."""
+    all_state = _load_all_reading_state()
+    state = all_state.get(book_id, {})
+    ideas = state.get("user_ideas", [])
+    idx = next((i for i, idea in enumerate(ideas) if idea.get("id") == idea_id), None)
+    if idx is None:
+        raise HTTPException(status_code=404, detail="User idea not found")
+    ideas.pop(idx)
+    _save_all_reading_state(all_state)
+    return {"book_id": book_id, "deleted": idea_id}
+
+
+@app.get("/ideas/all", tags=["navigation"])
+def all_book_ideas():
+    """Return generated + user-authored ideas across all books."""
+    from rag.inspect_utils import extract_book_ideas
+    registry_path = Path(_config.vectorstore.persist_directory) / "books.json"
+    if not registry_path.exists():
+        return {"ideas": [], "total": 0}
+    registry: dict = json.loads(registry_path.read_text())
+    all_state = _load_all_reading_state()
+    ideas: list[dict] = []
+    for book_id, meta in registry.items():
+        title = meta.get("title", book_id)
+        results_dir = _results_dir(book_id)
+        if not (results_dir / "chapter_insights.md").exists():
+            continue
+        generated = extract_book_ideas(book_id, _config)
+        for g in generated:
+            g.update({"source": "generated", "book_id": book_id, "title": title})
+        user = all_state.get(book_id, {}).get("user_ideas", [])
+        for u in user:
+            u.update({"source": "user", "book_id": book_id, "title": title})
+        ideas.extend(generated)
+        ideas.extend(user)
+    return {"ideas": ideas, "total": len(ideas)}
+
+
+@app.post("/ideas/synthesize", tags=["navigation"])
+async def synthesize_ideas(request: Request):
+    """Synthesize connections between selected idea items using the LLM."""
+    body = await request.json()
+    ideas = body.get("ideas", [])
+    if len(ideas) < 2:
+        raise HTTPException(status_code=400, detail="Select at least 2 ideas to synthesize")
+    if len(ideas) > 20:
+        raise HTTPException(status_code=400, detail="Select at most 20 ideas")
+
+    idea_lines = []
+    for i, idea in enumerate(ideas, 1):
+        src = f" [source: {idea.get('source', '?')}]"
+        book = f" [book: {idea.get('title', idea.get('book_id', '?'))}]" if idea.get("book_id") else ""
+        sec = f" (section: {idea.get('section', '?')})" if idea.get("section") else ""
+        idea_lines.append(f"{i}. [{idea.get('type', '?')}]{book}{sec}{src}: {idea.get('text', '')}")
+    ideas_block = "\n".join(idea_lines)
+
+    prompt = f"""You are analyzing a curated set of ideas from one or more books. The ideas below were selected by the reader as important.
+
+SELECTED IDEAS:
+{ideas_block}
+
+Provide a focused synthesis with these sections:
+
+**Connections**: What key connections, themes, or patterns link these ideas? Be specific and cite the idea numbers.
+
+**Tensions**: Are there any contradictions or tensions between the ideas? If none, say so briefly.
+
+**Opportunities**: List 2-5 concrete product ideas, project opportunities, or actionable experiments that emerge from combining these ideas. Each should reference which ideas it draws from.
+
+**Sources used**: List the idea numbers, types, and sections used in this synthesis.
+
+Keep the output concise and grounded in the selected ideas. Do not introduce unrelated concepts."""
+
+    from rag.config import load_config
+    from rag.llm import LLMClient
+    config = load_config("rag_config.yaml")
+    llm = LLMClient(config.generation)
+
+    try:
+        result = llm.generate(prompt, system="You are a concise idea synthesizer. Ground every claim in the provided ideas.")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"LLM request failed: {exc}")
+
+    return {
+        "synthesis": result,
+        "sources_used": [
+            {"type": idea.get("type"), "text": idea.get("text", "")[:100],
+             "section": idea.get("section", ""), "source": idea.get("source", "?"),
+             "book_id": idea.get("book_id", ""), "title": idea.get("title", "")}
+            for idea in ideas
+        ],
+        "total_ideas": len(ideas),
+    }
+
+
+@app.get("/books/{book_id}/read-section-paragraphs", tags=["navigation"])
+def read_section_paragraphs(
+    book_id: str,
+    section: str = Query(..., description="Section name"),
+):
+    """Return the section text as a list of paragraphs with overlap deduplicated."""
+    _require_book(book_id)
+    from rag.inspect_utils import read_section_paragraphs as _rsp
+    return _rsp(book_id, section, _config)
+
+
+@app.get("/books/{book_id}/section-progress", tags=["reading"])
+def get_section_progress(
+    book_id: str,
+    section: str = Query(..., description="Section name"),
+):
+    """Return the last-read paragraph index for a section (0-based)."""
+    state = _load_all_reading_state().get(book_id, {})
+    progress = state.get("section_progress", {})
+    return {"book_id": book_id, "section": section,
+            "last_read_paragraph": progress.get(section, -1)}
+
+
+@app.post("/books/{book_id}/section-progress", tags=["reading"])
+def set_section_progress(
+    book_id: str,
+    section: str = Query(..., description="Section name"),
+    paragraph: int = Query(..., description="0-based paragraph index"),
+):
+    """Set the last-read paragraph index for a section. Only advances forward."""
+    all_state = _load_all_reading_state()
+    state = all_state.setdefault(book_id, {})
+    progress = state.setdefault("section_progress", {})
+    current = progress.get(section, -1)
+    if paragraph > current:
+        progress[section] = paragraph
+    state["last_reader_section"] = section
+    _save_all_reading_state(all_state)
+    return {"book_id": book_id, "section": section,
+            "last_read_paragraph": progress[section]}
+
+
+@app.get("/books/{book_id}/read-section", tags=["navigation"])
+def read_section(
+    book_id: str,
+    section: str = Query(..., description="Section name"),
+):
+    """Return the full continuous text of a section with overlap deduplicated."""
+    _require_book(book_id)
+    from rag import inspect_utils
+    output = _capture(inspect_utils.read_section, book_id, section, _config)
+    return {"book_id": book_id, "section": section, "output": output}
+
+
 @app.get("/books/{book_id}/sections", tags=["navigation"])
 def list_sections(book_id: str):
     """List all summarised sections with lightweight metadata."""
@@ -233,6 +419,7 @@ def get_reading_state(book_id: str):
         "read_windows": state.get("read_windows", []),
         "last_read_window": state.get("last_read_window"),
         "last_read_section": state.get("last_read_section"),
+        "last_reader_section": state.get("last_reader_section"),
         "bookmarks": state.get("bookmarks", []),
         "saved_items": state.get("saved_items", []),
     }

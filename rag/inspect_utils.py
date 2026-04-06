@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from .config import RAGConfig
@@ -518,6 +519,137 @@ def inspect_window(
     print(f"  Rank:     {rank_str}")
     if sel_entry and sel_entry.get("reason"):
         print(f"  Reason:   {sel_entry['reason']}")
+    print()
+
+
+_IDEA_HEADING_MAP: dict[str, str] = {
+    "key claims": "key_idea",
+    "key claim": "key_idea",
+    "evidence & examples": "example",
+    "evidence and examples": "example",
+    "frameworks/concepts": "framework",
+    "frameworks / concepts": "framework",
+    "frameworks": "framework",
+    "concepts": "framework",
+}
+
+
+def extract_book_ideas(book_id: str, config: RAGConfig) -> list[dict]:
+    """Extract structured idea items from existing window summaries.
+
+    Parses ``**Heading**`` sections and numbered items from each window
+    summary.  Returns a flat list of ``{type, text, section, window}``
+    dicts.  Skips the ``actionable points`` category to keep the list
+    focused on ideas, evidence, and frameworks.
+    """
+    results_dir = Path(config.storage.results_directory) / book_id
+    ws_path = results_dir / "window_summaries.json"
+    if not ws_path.exists():
+        return []
+
+    window_data: dict = json.loads(ws_path.read_text())
+    ideas: list[dict] = []
+
+    for section_name, windows in window_data.items():
+        for ws in windows:
+            summary = ws.get("summary", "")
+            if not summary:
+                continue
+            win_num = ws.get("window", 0) + 1
+            parts = re.split(r"\*\*([^*]+)\*\*", summary)
+            for i in range(1, len(parts), 2):
+                heading = parts[i].strip().rstrip(":").lower()
+                idea_type = _IDEA_HEADING_MAP.get(heading)
+                if not idea_type:
+                    continue
+                body = parts[i + 1] if i + 1 < len(parts) else ""
+                for m in re.finditer(r"^\d+\.\s+(.+)", body, re.MULTILINE):
+                    text = m.group(1).strip()
+                    if text and len(text) > 10:
+                        ideas.append({
+                            "type": idea_type,
+                            "text": text,
+                            "section": section_name,
+                            "window": win_num,
+                        })
+    return ideas
+
+
+def read_section_paragraphs(
+    book_id: str, section: str, config: RAGConfig
+) -> dict:
+    """Return the full deduplicated text of a section as a list of paragraphs.
+
+    Each paragraph is a non-empty line from the concatenated, overlap-stripped
+    chunk text.  Returns ``{"section", "pages", "paragraphs": [str, ...]}``.
+    """
+    retrieval = Retrieval(config)
+    chunks = retrieval.get_chapter_chunks(book_id, section)
+    if not chunks:
+        return {"section": section, "pages": "", "paragraphs": []}
+
+    chunks.sort(key=lambda c: c.get("chunk_index", 0))
+
+    starts = [c["page_start"] for c in chunks if c.get("page_start") is not None]
+    ends = [c["page_end"] for c in chunks if c.get("page_end") is not None]
+    pages = f"pp. {min(starts)}\u2013{max(ends)}" if starts and ends else ""
+
+    parts: list[str] = []
+    prev_text = ""
+    for chunk in chunks:
+        text = chunk.get("text", "")
+        if not text.strip():
+            continue
+        skip = _find_leading_overlap(prev_text, text) if prev_text else 0
+        display = text[skip:].lstrip("\n") if skip else text
+        if display.strip():
+            parts.append(display)
+        prev_text = text
+
+    full = "\n".join(parts)
+    paragraphs = [p.strip() for p in full.split("\n") if p.strip()]
+    return {"section": section, "pages": pages, "paragraphs": paragraphs}
+
+
+def read_section(book_id: str, section: str, config: RAGConfig) -> None:
+    """Print the full continuous text of a section with overlap deduplicated.
+
+    Retrieves all chunks for the section, sorts by chunk_index, strips the
+    200-char overlap between consecutive chunks, and prints the result as
+    one continuous reading passage.
+    """
+    retrieval = Retrieval(config)
+    chunks = retrieval.get_chapter_chunks(book_id, section)
+    if not chunks:
+        print(f"No text found for section '{section}' in '{book_id}'.")
+        return
+
+    chunks.sort(key=lambda c: c.get("chunk_index", 0))
+
+    # --- Page range across all chunks ---
+    starts = [c["page_start"] for c in chunks if c.get("page_start") is not None]
+    ends = [c["page_end"] for c in chunks if c.get("page_end") is not None]
+    pages = f"pp. {min(starts)}\u2013{max(ends)}" if starts and ends else ""
+
+    print(f"\n{'=' * 70}")
+    print(f"  {section}")
+    if pages:
+        print(f"  {pages}  ·  {len(chunks)} chunks")
+    else:
+        print(f"  {len(chunks)} chunks")
+    print(f"{'=' * 70}\n")
+
+    prev_text = ""
+    for chunk in chunks:
+        text = chunk.get("text", "")
+        if not text.strip():
+            continue
+        skip = _find_leading_overlap(prev_text, text) if prev_text else 0
+        display = text[skip:].lstrip("\n") if skip else text
+        if display.strip():
+            print(display)
+        prev_text = text
+
     print()
 
 
