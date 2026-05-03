@@ -1,70 +1,58 @@
 # Working Memory
 
-Rolling context. Updated after each iteration. Refresh when it grows stale.
-
 ## Current goal
+Harden the RAG pipeline; CrewAI is not the active focus.
 
-Develop and harden the RAG pipeline. The CrewAI pipeline is not the active focus.
-
-## Recent progress (iterations 8–11)
-
-- **iter 8**: Major `analysis.py` refactor — content-diversity window selection via MMR,
-  `mmr_lambda` config knob, `selection_strategy` setting.
-- **iter 9**: Added `rag/evaluate.py` — evaluates summary quality against source chunks;
-  `rag_cli.py evaluate` command; results land in `data/results/<book_id>/evaluations/`.
-- **iter 10**: Added `rag/navigation.py` with `trace` (idea → matching sections) and
-  `explore` (single section detail); added `scripts/validate_rag.sh`.
-- **iter 11**: Tested and fixed `navigation.py` end-to-end on `digital-minimalism`.
-  Three bugs fixed: (1) `_compact_preview` produced empty `...` when first paragraph
-  exceeded 400 chars; (2) `trace` snippets exposed raw `## heading` / `**Type:**`
-  metadata lines; (3) `explore` Source section dumped all 34 chunk IDs on one line.
-  Both commands produce clean, readable output. No regressions.
-
-Test book throughout: `digital-minimalism`. Summary + evaluations exist for it.
-
-## Active assumptions
-
-- RAG pipeline is primary; CrewAI pipeline (`main.py` / `crews/`) is not being extended.
-- `llama3.1` via Ollama is good enough for summarization quality at this scale.
-- Summary quality has not been formally assessed beyond the one eval in `evaluations/`.
-- Cache is at `PROMPT_VERSION = "v4"` — if prompts change next iteration, bump it.
+## Latest progress
+- RAG hardening landed: MMR selection, eval flow, and navigation (`trace`/`explore`) are implemented and working on `digital-minimalism`.
+- `review-eval` CLI works; fallback-env validation passed for `python rag_cli.py review-eval digital-minimalism`.
+- `fiction-whois` real CLI flow passes on `pale-criminal`/`Gunther`, reads `fiction_state.json`, respects chapter cutoff, and has regression coverage.
+- Recent UI/repo hygiene work completed; no current action needed there.
 
 ## Open questions
+- Is the `digital-minimalism` summary actually good enough after reviewing eval output?
+- Is CrewAI retained at all, or effectively dead code?
+- Should `fiction-whois` get one more fixture/assertion for schema variation or output-label regression protection?
+- Some validation paths still fail in this runner due to missing tools/deps (`python -m pytest`, `rag_cli.py --help`).
 
-- Is summary quality actually good on `digital-minimalism`? Eval exists but hasn't been reviewed.
-- Is `navigation.py` (`trace`/`explore`) working end-to-end? ✓ Resolved in iter 11.
-- Is the CrewAI pipeline being kept at all, or is it dead code?
+## Active assumptions
+- `llama3.1` via Ollama is sufficient for current summarization experiments.
+- Summary quality has not yet been meaningfully reviewed beyond generating eval/review output.
+- If prompts change, bump `PROMPT_VERSION` from `v4`.
+- `fiction_state.json` may still vary enough that current tests miss edge cases.
 
-## Next likely steps
+## What matters next
+- Use `review-eval` to inspect `digital-minimalism` quality and decide whether prompt/selection changes are needed.
+- If eval is weak, revise summary prompts/selection and bump `PROMPT_VERSION`.
+- Add a second book to exercise multi-book `compare` and `ask` flows.
+- Optionally add one more `fiction-whois` fixture/assertion for schema variation/formatting.## Iteration 0 · 2026-03-29 22:54:09 UTC
 
-- Review eval output for `digital-minimalism` and decide if quality is acceptable.
-- ~~Test `trace` and `explore` commands end-to-end.~~ Done in iter 11.
-- Add a second book to test multi-book `compare` and `ask` commands.
-- Or: improve summary prompts based on eval feedback (would require PROMPT_VERSION bump).
-## Iteration 0 · 2026-03-17 02:37:54 UTC
+**Progress:** Add a small direct-prompt bypass mode to the orchestrator web UI by introducing a checkbox, threading a boolean flag through the existing start-run request path, and creating the thinnest compatible backend path that skips planner invocation while preserving downstream execution/review behavior as much as possible.
 
-**Progress:** Add a minimal top-level argparse version flag to rag_cli.py and update its module docstring usage example, touching only that file.
+**Decisions:** approved — executor exit 0. Validation: `grep -q 'Use prompt directly (skip planner)' rag_ui.html` → passed; `python - <<'PY'
+from pathlib import Path
+files = [Path('rag_api.py'), Path('main.py'), Path('tools.py')]
+text = '\n'.join(p.read_text() for p in files if p.exists())
+assert 'use_prompt_directly' in text or 'skip planner' in text.lower()
+print('backend flag handling present')
+PY` → passed; `python - <<'PY'
+from pathlib import Path
+files = [Path('rag_api.py'), Path('main.py'), Path('tools.py')]
+text = '\n'.join(p.read_text() for p in files if p.exists())
+needles = ['use_prompt_directly', 'executor_prompt', 'submitted prompt', 'prompt directly']
+assert 'use_prompt_directly' in text and any(n in text for n in needles)
+print('direct prompt bypass path present')
+PY` → passed; `python - <<'PY'
+from pathlib import Path
+files = [Path('rag_api.py'), Path('main.py'), Path('tools.py')]
+text = '\n'.join(p.read_text() for p in files if p.exists())
+assert 'planner' in text.lower()
+print('normal planner path still referenced')
+PY` → passed; `test -f /tmp/orchestrator_direct_prompt_validation.txt` → passed.
 
-**Decisions:** approved — executor exit 0. Validation: `python rag_cli.py --version` → missing_tool; `grep "\-\-version" rag_cli.py` → passed.
+**Assumptions:** The main risk is not knowing the exact orchestrator server file and data shape without inspection; the executor should keep the change tightly scoped to the actual start-run route and avoid inventing new architecture. Another risk is downstream code expecting planner-produced structured objects; mitigate by creating the smallest compatible object only where required. Validation is intentionally file/text-based because runtime services may not be available.
 
-**Assumptions:** Low risk. Main risk is adding the version flag to a subparser instead of the top-level parser, or accidentally changing parser logic beyond the minimal addition.
-
-**Open questions:**
-- Missing tool/dep for `python rag_cli.py --version` — needs env fix
-
-**Next:** If validation passes, this task is complete. No further code changes should be needed.
-
----
-
-## Iteration 1 · 2026-03-17 02:39:34 UTC
-
-**Progress:** Verify the existing minimal `rag_cli.py` version-flag change using the correct Python executable/environment, without making further code changes unless verification reveals a real issue.
-
-**Decisions:** approved — executor exit 0. Validation: `.venv/bin/python rag_cli.py --version || python3 rag_cli.py --version || python rag_cli.py --version` → passed; `grep "\-\-version" rag_cli.py` → passed.
-
-**Assumptions:** Low risk. Main risk is mistaking an environment PATH issue for a code defect and making unnecessary edits. Secondary risk is using a Python executable that imports a different environment than the repo expects.
-
-**Next:** If the version command succeeds with the expected output and grep confirms the flag/docstring line, the task is complete with no further changes needed.
+**Next:** After this lands, the next small step would be a focused polish pass only if needed: show the selected mode more clearly in run/review status output or add one narrow regression test for planner vs direct-prompt branching, but only after confirming this minimal path works cleanly.
 
 ---
 

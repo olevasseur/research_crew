@@ -153,11 +153,55 @@ def inspect_window(
     return {"book_id": book_id, "window": window, "section": section, "output": output}
 
 
-@app.get("/books/{book_id}/ideas", tags=["navigation"])
-def book_ideas(book_id: str):
-    """Return generated + user-authored idea items for a book."""
-    _require_book(book_id)
-    from rag.inspect_utils import extract_book_ideas
+def _idea_note_key(idea: dict) -> str:
+    """Compute a stable key for attaching notes to an idea."""
+    if idea.get("source") == "user" and idea.get("id") is not None:
+        return f"user:{idea['id']}"
+    import hashlib
+    h = hashlib.md5(idea.get("text", "").encode()).hexdigest()[:8]
+    return f"gen:{idea.get('type', '')}:{idea.get('section', '')}:{h}"
+
+
+def _enrich_ideas_with_notes(ideas: list[dict], book_id: str) -> None:
+    """Stamp note_key and note (if any) onto each idea in-place."""
+    notes = _load_all_reading_state().get(book_id, {}).get("idea_notes", {})
+    for idea in ideas:
+        key = _idea_note_key(idea)
+        idea["note_key"] = key
+        note = notes.get(key, "")
+        if note:
+            idea["note"] = note
+
+
+def _enrich_ideas_with_curation(ideas: list[dict], book_id: str) -> None:
+    """Stamp pinned/hidden/near_duplicate flags onto each idea from curation state."""
+    from rag.curation import enrich_idea_data_with_curation_signals
+    for idea in ideas:
+        if not idea.get("note_key"):
+            idea["note_key"] = _idea_note_key(idea)
+    enrich_idea_data_with_curation_signals(ideas, book_id)
+
+
+_LINKED_EXAMPLE_FIELDS = ("text", "section", "window", "type", "source", "note_key", "match_score")
+
+
+def _enrich_ideas_with_linked_examples(ideas: list[dict]) -> None:
+    """Attach a small list of matched examples to each non-example idea."""
+    from rag.idea_linker import link_ideas_to_examples, idea_key
+    targets = [i for i in ideas if i.get("type") != "example"]
+    examples = [i for i in ideas if i.get("type") == "example"]
+    links = link_ideas_to_examples(targets, examples, top_k=3)
+    for idea in targets:
+        matched = links.get(idea_key(idea), [])
+        idea["linked_examples"] = [
+            {k: ex.get(k) for k in _LINKED_EXAMPLE_FIELDS if k in ex}
+            for ex in matched
+        ]
+
+
+def _load_book_ideas(book_id: str) -> list[dict]:
+    """Return generated + user-authored ideas with shared ranking signals."""
+    from rag.inspect_utils import extract_book_ideas, score_book_ideas
     generated = extract_book_ideas(book_id, _config)
     for g in generated:
         g["source"] = "generated"
@@ -165,7 +209,53 @@ def book_ideas(book_id: str):
     for u in user:
         u["source"] = "user"
     ideas = generated + user
+    _enrich_ideas_with_notes(ideas, book_id)
+    _enrich_ideas_with_curation(ideas, book_id)
+    score_book_ideas(ideas, book_id, _config)
+    return ideas
+
+
+@app.get("/books/{book_id}/ideas", tags=["navigation"])
+def book_ideas(book_id: str):
+    """Return generated + user-authored idea items for a book, ranked."""
+    _require_book(book_id)
+    ideas = _load_book_ideas(book_id)
+    _enrich_ideas_with_linked_examples(ideas)
     return {"book_id": book_id, "ideas": ideas, "total": len(ideas)}
+
+
+@app.get("/books/{book_id}/examples", tags=["navigation"])
+def book_examples(book_id: str):
+    """Return examples ranked by the strength of associated ideas."""
+    _require_book(book_id)
+    from rag.idea_linker import rank_examples_by_idea_links
+
+    ideas = _load_book_ideas(book_id)
+    ranked = rank_examples_by_idea_links(
+        [i for i in ideas if i.get("type") != "example"],
+        [i for i in ideas if i.get("type") == "example"],
+    )
+    examples = []
+    for ex in ranked:
+        examples.append({
+            "example_key": ex.get("example_key"),
+            "text": ex.get("text"),
+            "section": ex.get("section"),
+            "window": ex.get("window"),
+            "rank_score": ex.get("example_score"),
+            "example_score": ex.get("example_score"),
+            "example_score_parts": ex.get("example_score_parts"),
+            "associated_ideas": ex.get("associated_ideas", []),
+            "source": ex.get("source"),
+            "source_fields": {
+                "type": ex.get("type"),
+                "note_key": ex.get("note_key"),
+                "pinned": ex.get("pinned"),
+                "hidden": ex.get("hidden"),
+                "near_duplicate": ex.get("near_duplicate"),
+            },
+        })
+    return {"book_id": book_id, "examples": examples, "total": len(examples)}
 
 
 @app.post("/books/{book_id}/ideas", tags=["navigation"])
@@ -202,6 +292,167 @@ def delete_user_idea(book_id: str, idea_id: int):
     return {"book_id": book_id, "deleted": idea_id}
 
 
+@app.put("/books/{book_id}/idea-notes/{note_key:path}", tags=["navigation"])
+def put_idea_note(
+    book_id: str,
+    note_key: str,
+    text: str = Query(..., description="Note text (empty to clear)"),
+):
+    """Set or clear a note on an idea."""
+    all_state = _load_all_reading_state()
+    state = all_state.setdefault(book_id, {})
+    notes = state.setdefault("idea_notes", {})
+    if text.strip():
+        notes[note_key] = text.strip()
+    else:
+        notes.pop(note_key, None)
+    _save_all_reading_state(all_state)
+    return {"book_id": book_id, "note_key": note_key, "note": notes.get(note_key, "")}
+
+
+@app.get("/books/{book_id}/curation", tags=["navigation"])
+def get_book_curation(book_id: str):
+    """Return the curation state (pinned/hidden flags per idea) for a book."""
+    from rag.curation import load_book_curation
+    return {"book_id": book_id, "curation": load_book_curation(book_id)}
+
+
+@app.post("/books/{book_id}/curation", tags=["navigation"])
+def post_book_curation(
+    book_id: str,
+    idea_id: str = Query(..., description="Stable idea identifier (note_key)"),
+    action: str = Query(..., description="pin, unpin, hide, or unhide"),
+):
+    """Apply a curation action (pin/unpin/hide/unhide) to an idea."""
+    from rag.curation import store_curation_state
+    try:
+        updated = store_curation_state(book_id, idea_id, action)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "book_id": book_id,
+        "idea_id": idea_id,
+        "action": action,
+        "curation": updated,
+    }
+
+
+@app.post("/books/{book_id}/ask", tags=["navigation"])
+async def ask_book(book_id: str, request: Request):
+    """Answer a question about a book using relevant ideas, notes, and saved passages."""
+    _require_book(book_id)
+    body = await request.json()
+    question = (body.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="question is required")
+
+    from rag.inspect_utils import (
+        extract_book_ideas, score_book_ideas,
+        rank_ideas_for_query, rank_passages_for_query,
+    )
+
+    # Build scored idea pool (includes note text in matching)
+    book_state = _load_all_reading_state().get(book_id, {})
+    generated = extract_book_ideas(book_id, _config)
+    for g in generated:
+        g["source"] = "generated"
+    user = book_state.get("user_ideas", [])
+    for u in user:
+        u["source"] = "user"
+    ideas = generated + user
+    _enrich_ideas_with_notes(ideas, book_id)
+    _enrich_ideas_with_curation(ideas, book_id)
+    score_book_ideas(ideas, book_id, _config)
+
+    # Retrieve top relevant ideas. Hidden ideas are excluded by default;
+    # callers can explicitly opt in via include_hidden=true on the request body.
+    top_k = min(int(body.get("top_k", 10)), 20)
+    include_hidden = bool(body.get("include_hidden", False))
+    selected_ideas = rank_ideas_for_query(
+        ideas, question, top_k=top_k, include_hidden=include_hidden
+    )
+
+    # Retrieve relevant saved passages
+    passages = book_state.get("saved_passages", [])
+    selected_passages = rank_passages_for_query(passages, question, top_k=3)
+
+    # Format mixed evidence for prompt
+    evidence_lines = []
+    idx = 1
+    for idea in selected_ideas:
+        sec = f" (section: {idea.get('section', '?')})" if idea.get("section") else ""
+        typ = idea.get("type", "?")
+        src = "your idea" if idea.get("source") == "user" else "idea"
+        note_suffix = f" [your note: {idea['note']}]" if idea.get("note") else ""
+        evidence_lines.append(f"{idx}. [{src}/{typ}]{sec}: {idea.get('text', '')}{note_suffix}")
+        idx += 1
+    for p in selected_passages:
+        sec = f" (section: {p.get('section', '?')})" if p.get("section") else ""
+        evidence_lines.append(f"{idx}. [saved passage]{sec}: {p.get('preview', '')}")
+        idx += 1
+    evidence_block = "\n".join(evidence_lines)
+
+    total_evidence = len(selected_ideas) + len(selected_passages)
+    total_candidates = len(ideas) + len(passages)
+
+    prompt = f"""You are answering a question about a book using only the evidence below. The evidence includes book ideas (some with the reader's personal notes) and saved passages that the reader highlighted.
+
+QUESTION:
+{question}
+
+EVIDENCE ({total_evidence} items, ranked by relevance):
+{evidence_block}
+
+Instructions:
+- Answer the question using only the evidence provided above.
+- Cite source numbers (e.g. [1], [3]) when drawing on specific items.
+- Items marked [your idea] or [your note] or [saved passage] reflect the reader's own annotations — give them appropriate weight.
+- If the evidence is insufficient to fully answer the question, say so clearly.
+- Be concise and direct.
+- End with a "Sources used:" line listing the source numbers you referenced."""
+
+    from rag.llm import LLMClient
+    llm = LLMClient(_config.generation)
+    try:
+        answer = llm.generate(
+            prompt,
+            system="You are a concise book analyst. Answer only from the provided evidence. Cite sources.",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"LLM request failed: {exc}")
+
+    # Build sources_used with provenance
+    sources_used = []
+    for idea in selected_ideas:
+        sources_used.append({
+            "type": idea.get("type"),
+            "text": idea.get("text", "")[:120],
+            "section": idea.get("section", ""),
+            "source": idea.get("source", "?"),
+            "has_note": bool(idea.get("note")),
+            "pinned": bool(idea.get("pinned")),
+            "query_score": idea.get("query_score", 0),
+        })
+    for p in selected_passages:
+        sources_used.append({
+            "type": "passage",
+            "text": p.get("preview", "")[:120],
+            "section": p.get("section", ""),
+            "source": "saved_passage",
+            "has_note": False,
+            "query_score": p.get("query_score", 0),
+        })
+
+    return {
+        "book_id": book_id,
+        "question": question,
+        "answer": answer,
+        "sources_used": sources_used,
+        "total_candidates": total_candidates,
+        "total_sources_used": total_evidence,
+    }
+
+
 @app.get("/ideas/all", tags=["navigation"])
 def all_book_ideas():
     """Return generated + user-authored ideas across all books."""
@@ -223,8 +474,9 @@ def all_book_ideas():
         user = all_state.get(book_id, {}).get("user_ideas", [])
         for u in user:
             u.update({"source": "user", "book_id": book_id, "title": title})
-        ideas.extend(generated)
-        ideas.extend(user)
+        book_ideas = generated + user
+        _enrich_ideas_with_notes(book_ideas, book_id)
+        ideas.extend(book_ideas)
     return {"ideas": ideas, "total": len(ideas)}
 
 
@@ -422,6 +674,7 @@ def get_reading_state(book_id: str):
         "last_reader_section": state.get("last_reader_section"),
         "bookmarks": state.get("bookmarks", []),
         "saved_items": state.get("saved_items", []),
+        "saved_passages": state.get("saved_passages", []),
     }
 
 
@@ -552,6 +805,59 @@ def all_saved_items():
         for item in state.get("saved_items", []):
             result.append({"book_id": bid, **item})
     return {"saved_items": result, "total": len(result)}
+
+
+@app.post("/books/{book_id}/reading-state/save-passage", tags=["reading"])
+def toggle_saved_passage(
+    book_id: str,
+    section: str = Query(..., description="Section name"),
+    paragraph: int = Query(..., description="0-based paragraph index"),
+    preview: str = Query("", description="Short text from the paragraph"),
+):
+    """Toggle a saved passage. Adds if absent, removes if present."""
+    all_state = _load_all_reading_state()
+    state = all_state.setdefault(book_id, {})
+    passages = state.setdefault("saved_passages", [])
+
+    existing = next(
+        (i for i, p in enumerate(passages)
+         if p["section"] == section and p["paragraph_index"] == paragraph),
+        None,
+    )
+    if existing is not None:
+        passages.pop(existing)
+        action = "removed"
+    else:
+        entry: dict = {
+            "section": section,
+            "paragraph_index": paragraph,
+            "preview": preview[:200] if preview else "",
+        }
+        registry_path = Path(_config.vectorstore.persist_directory) / "books.json"
+        if registry_path.exists():
+            try:
+                registry = json.loads(registry_path.read_text())
+                title = registry.get(book_id, {}).get("title")
+                if title:
+                    entry["title"] = title
+            except Exception:
+                pass
+        passages.append(entry)
+        action = "added"
+
+    _save_all_reading_state(all_state)
+    return {"book_id": book_id, "action": action, "saved_passages": passages}
+
+
+@app.get("/saved-passages", tags=["reading"])
+def all_saved_passages():
+    """Return all saved passages across all books."""
+    all_state = _load_all_reading_state()
+    result = []
+    for bid, state in all_state.items():
+        for p in state.get("saved_passages", []):
+            result.append({"book_id": bid, **p})
+    return {"saved_passages": result, "total": len(result)}
 
 
 @app.get("/books/{book_id}/fiction/available", tags=["fiction"])

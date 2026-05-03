@@ -7,15 +7,25 @@ import re
 from pathlib import Path
 
 from .config import RAGConfig
-from .embeddings import OllamaEmbedder
-from .retrieval import Retrieval
-from .store import VectorStore
+
+
+def _new_retrieval(config: RAGConfig):
+    from .retrieval import Retrieval
+
+    return Retrieval(config)
+
+
+def _new_vector_store(config: RAGConfig):
+    from .embeddings import OllamaEmbedder
+    from .store import VectorStore
+
+    embedder = OllamaEmbedder(config.embedding)
+    return VectorStore(config.vectorstore, embedder)
 
 
 def inspect_books(config: RAGConfig) -> None:
     """Print all ingested books."""
-    embedder = OllamaEmbedder(config.embedding)
-    store = VectorStore(config.vectorstore, embedder)
+    store = _new_vector_store(config)
     books = store.list_books()
     if not books:
         print("No books ingested yet.")
@@ -41,7 +51,7 @@ def inspect_books(config: RAGConfig) -> None:
 
 def inspect_chunks(book_id: str, config: RAGConfig, chapter: str | None = None) -> None:
     """Print chunks for a book, optionally filtered by section name."""
-    retrieval = Retrieval(config)
+    retrieval = _new_retrieval(config)
     if chapter:
         chunks = retrieval.get_chapter_chunks(book_id, chapter)
     else:
@@ -82,8 +92,7 @@ def inspect_chunks(book_id: str, config: RAGConfig, chapter: str | None = None) 
 
 def inspect_structure(book_id: str, config: RAGConfig) -> None:
     """Print the detected section structure for an ingested book."""
-    embedder = OllamaEmbedder(config.embedding)
-    store = VectorStore(config.vectorstore, embedder)
+    store = _new_vector_store(config)
     info = store.get_book_info(book_id)
     if not info:
         print(f"Book '{book_id}' not found. Ingest it first.")
@@ -128,7 +137,7 @@ def inspect_structure(book_id: str, config: RAGConfig) -> None:
 
 def inspect_subchunks(book_id: str, section: str, config: RAGConfig) -> None:
     """Print detailed subchunk info for a single section."""
-    retrieval = Retrieval(config)
+    retrieval = _new_retrieval(config)
     chunks = retrieval.get_chapter_chunks(book_id, section)
     if not chunks:
         print(f"No chunks found for section '{section}' in '{book_id}'")
@@ -422,7 +431,7 @@ def inspect_window(
     )
 
     # --- Load chunk text from vectorstore ---
-    retrieval = Retrieval(config)
+    retrieval = _new_retrieval(config)
     chunk_ids: list[str] = found_ws.get("chunk_ids", [])
     chapter_chunks = retrieval.get_chapter_chunks(book_id, found_sec)
     chunk_map = {c["id"]: c for c in chapter_chunks}
@@ -575,6 +584,310 @@ def extract_book_ideas(book_id: str, config: RAGConfig) -> list[dict]:
     return ideas
 
 
+def score_book_ideas(
+    ideas: list[dict],
+    book_id: str,
+    config: RAGConfig,
+) -> None:
+    """Attach ``rank_score`` to each idea in-place for deterministic ranking.
+
+    Signals (generated ideas only — user-authored always get 1.0):
+      - Window content score from summarization  (weight 0.40)
+      - Text quality: length + specificity cues  (weight 0.35)
+      - User-note bonus                          (+0.15)
+      - Near-duplicate penalty within type        (−0.10)
+    """
+    results_dir = Path(config.storage.results_directory) / book_id
+    ws_path = results_dir / "window_summaries.json"
+    win_scores: dict[tuple[str, int], float] = {}
+    if ws_path.exists():
+        for sec, windows in json.loads(ws_path.read_text()).items():
+            for w in windows:
+                win_scores[(sec, w.get("window", 0) + 1)] = w.get("score", 0.5)
+
+    for idea in ideas:
+        if idea.get("source") == "user":
+            idea["rank_score"] = 1.0
+            continue
+
+        s = 0.0
+
+        # --- window content score (0.40) ---
+        ws = win_scores.get(
+            (idea.get("section", ""), idea.get("window", 0)), 0.5
+        )
+        s += 0.40 * ws
+
+        # --- text quality (0.35) ---
+        text = idea.get("text", "")
+        tlen = len(text)
+        if tlen < 30:
+            lq = 0.2
+        elif tlen < 60:
+            lq = 0.5
+        elif tlen <= 200:
+            lq = 1.0
+        else:
+            lq = 0.85
+        spec = 0.0
+        if re.search(r"\[p\.\s*\d+\]", text):
+            spec += 0.3
+        if re.search(r"[A-Z][a-z]+\s+[A-Z][a-z]+", text):
+            spec += 0.2
+        if re.search(r"\d{2,}", text):
+            spec += 0.1
+        if '"' in text or "\u2018" in text or "\u201c" in text:
+            spec += 0.1
+        spec = min(spec, 0.5)
+        tq = 0.6 * lq + 0.4 * (spec / 0.5 if spec else 0.0)
+        s += 0.35 * tq
+
+        # --- note bonus (0.15) ---
+        if idea.get("note"):
+            s += 0.15
+
+        s += 0.05  # base
+        idea["rank_score"] = round(s, 4)
+
+    # --- near-duplicate suppression within each type ---
+    by_type: dict[str, list[dict]] = {}
+    for idea in ideas:
+        if idea.get("source") == "user":
+            continue
+        by_type.setdefault(idea["type"], []).append(idea)
+
+    def _content_tokens(text: str) -> set[str]:
+        return {
+            w for w in re.sub(r"[^\w\s]", " ", text.lower()).split()
+            if w not in _STOP and len(w) > 2
+        }
+
+    for group in by_type.values():
+        group.sort(key=lambda x: x.get("rank_score", 0), reverse=True)
+        seen: list[set[str]] = []
+        for idea in group:
+            words = _content_tokens(idea.get("text", ""))
+            if len(words) < 4:
+                continue
+            for prev_words in seen:
+                overlap = len(words & prev_words) / max(len(words | prev_words), 1)
+                if overlap >= 0.50:
+                    idea["rank_score"] = round(
+                        idea.get("rank_score", 0) - 0.10, 4
+                    )
+                    idea["near_dup"] = True
+                    break
+            seen.append(words)
+
+
+# ── Stopwords for query relevance (kept minimal) ────────────────────────
+_STOP = frozenset(
+    "a an the is are was were be been being have has had do does did will "
+    "would shall should may might can could of in to for on with at by from "
+    "and or but not no nor so yet this that these those it its i me my we "
+    "our you your he she they them their what which who whom how about into "
+    "than too very also just as".split()
+)
+
+
+def rank_ideas_for_query(
+    ideas: list[dict],
+    query: str,
+    *,
+    top_k: int = 10,
+    include_hidden: bool = False,
+) -> list[dict]:
+    """Return the *top_k* ideas most relevant to *query*.
+
+    Scoring combines token overlap with the existing ``rank_score``
+    (from :func:`score_book_ideas`) as a quality prior.
+
+    Signals:
+      - Token overlap between query and idea text      (weight 0.55)
+      - Token overlap between query and section name   (weight 0.15)
+      - Existing rank_score quality prior               (weight 0.20)
+      - User-authored / has-note bonus                  (weight 0.10)
+      - Pinned curation boost                           (additive 0.25)
+      - Hidden curation penalty                         (additive -0.5 when
+        ``include_hidden=True``; hidden ideas are excluded entirely by default)
+      - Near-duplicate penalty                          (additive -0.15 so the
+        canonical idea in a near-duplicate pair wins the retrieval slot)
+
+    Returns a new list sorted by combined relevance, trimmed to *top_k*.
+    Each returned idea gets a ``query_score`` field attached.
+    """
+    # Default policy: hidden ideas are excluded from the candidate pool.
+    # When include_hidden=True (explicit opt-in), hidden ideas stay but get a
+    # strong additive penalty so only overwhelmingly relevant ones survive.
+    if not include_hidden:
+        ideas = [i for i in ideas if not i.get("hidden")]
+
+    query_tokens = {
+        w for w in re.sub(r"[^\w\s]", " ", query.lower()).split()
+        if w not in _STOP and len(w) > 1
+    }
+    if not query_tokens:
+        # No meaningful tokens — fall back to rank_score order (pinned still wins ties)
+        ranked = sorted(
+            ideas,
+            key=lambda x: (bool(x.get("pinned")), x.get("rank_score", 0)),
+            reverse=True,
+        )
+        for it in ranked:
+            it["query_score"] = it.get("rank_score", 0) + (0.25 if it.get("pinned") else 0.0)
+        return ranked[:top_k]
+
+    scored: list[tuple[float, dict]] = []
+    for idea in ideas:
+        # Include note text in matching so annotated ideas surface better
+        idea_text = idea.get("text", "")
+        note_text = idea.get("note", "")
+        full_text = (idea_text + " " + note_text) if note_text else idea_text
+        idea_tokens = {
+            w for w in re.sub(r"[^\w\s]", " ", full_text.lower()).split()
+            if w not in _STOP and len(w) > 1
+        }
+        sec_tokens = {
+            w for w in re.sub(r"[^\w\s]", " ", idea.get("section", "").lower()).split()
+            if w not in _STOP and len(w) > 1
+        }
+
+        # Text overlap (0.55)
+        if idea_tokens:
+            text_overlap = len(query_tokens & idea_tokens) / len(query_tokens)
+        else:
+            text_overlap = 0.0
+
+        # Section overlap (0.15)
+        if sec_tokens:
+            sec_overlap = len(query_tokens & sec_tokens) / len(query_tokens)
+        else:
+            sec_overlap = 0.0
+
+        # Rank score prior (0.20)
+        rank_prior = idea.get("rank_score", 0.3)
+
+        # User/note bonus (0.10)
+        bonus = 0.0
+        if idea.get("source") == "user":
+            bonus = 1.0
+        elif idea.get("note"):
+            bonus = 0.7
+
+        # Pinned boost (additive; pinned items rise meaningfully without
+        # overwhelming strong query matches).
+        pinned_boost = 0.25 if idea.get("pinned") else 0.0
+
+        # Hidden penalty — only reachable when include_hidden=True (hidden
+        # ideas are pre-filtered otherwise). Strong enough that a hidden idea
+        # needs near-perfect query match to beat a pinned or high-relevance one.
+        hidden_penalty = -0.5 if idea.get("hidden") else 0.0
+
+        # Near-duplicate penalty — honor either signal:
+        #  * 'near_duplicate' from curation enrichment (strict shingle match),
+        #  * 'near_dup' from score_book_ideas (looser token-overlap match that
+        #    catches paraphrased restatements of the same idea).
+        # Whichever fires, we penalize the weaker twin so the canonical idea
+        # wins its retrieval slot and duplicates don't crowd selected evidence.
+        is_near_dup = bool(idea.get("near_duplicate") or idea.get("near_dup"))
+        near_dup_penalty = -0.15 if is_near_dup else 0.0
+
+        combined = (
+            0.55 * text_overlap
+            + 0.15 * sec_overlap
+            + 0.20 * rank_prior
+            + 0.10 * bonus
+            + pinned_boost
+            + hidden_penalty
+            + near_dup_penalty
+        )
+        idea["query_score"] = round(combined, 4)
+        scored.append((combined, idea))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    # Greedy dedup in two passes:
+    # 1. Skip items already flagged as near_duplicate/near_dup by the
+    #    upstream curation/scoring signals (their canonical twin wins).
+    # 2. Additionally skip items whose normalized-token Jaccard against an
+    #    already-selected item exceeds 0.60 — this catches cross-type
+    #    restatements (e.g. the same definition surfaced as both a
+    #    'key_idea' and a 'framework') that per-type near_dup missed.
+    # Any item skipped by either check is pushed to a backfill queue and
+    #  only used if we still have room after non-duplicate candidates.
+    def _tokset(text: str) -> set[str]:
+        return {
+            w for w in re.sub(r"[^\w\s]", " ", (text or "").lower()).split()
+            if w not in _STOP and len(w) > 2
+        }
+
+    def _jac(a: set[str], b: set[str]) -> float:
+        if not a or not b:
+            return 0.0
+        return len(a & b) / len(a | b)
+
+    selected: list[dict] = []
+    selected_tokens: list[set[str]] = []
+    dup_backfill: list[dict] = []
+    for _, idea in scored:
+        if len(selected) >= top_k:
+            break
+        if idea.get("near_duplicate") or idea.get("near_dup"):
+            dup_backfill.append(idea)
+            continue
+        toks = _tokset(idea.get("text", ""))
+        if any(_jac(toks, prev) >= 0.60 for prev in selected_tokens):
+            dup_backfill.append(idea)
+            continue
+        selected.append(idea)
+        selected_tokens.append(toks)
+    for idea in dup_backfill:
+        if len(selected) >= top_k:
+            break
+        selected.append(idea)
+    return selected
+
+
+def rank_passages_for_query(
+    passages: list[dict],
+    query: str,
+    *,
+    top_k: int = 3,
+) -> list[dict]:
+    """Return the *top_k* saved passages most relevant to *query*.
+
+    Each passage has ``preview`` (text) and ``section``.  Scoring uses
+    token overlap with the preview and section name.
+    """
+    if not passages:
+        return []
+    query_tokens = {
+        w for w in re.sub(r"[^\w\s]", " ", query.lower()).split()
+        if w not in _STOP and len(w) > 1
+    }
+    if not query_tokens:
+        return passages[:top_k]
+
+    scored: list[tuple[float, dict]] = []
+    for p in passages:
+        preview_tokens = {
+            w for w in re.sub(r"[^\w\s]", " ", p.get("preview", "").lower()).split()
+            if w not in _STOP and len(w) > 1
+        }
+        sec_tokens = {
+            w for w in re.sub(r"[^\w\s]", " ", p.get("section", "").lower()).split()
+            if w not in _STOP and len(w) > 1
+        }
+        text_ov = len(query_tokens & preview_tokens) / len(query_tokens) if preview_tokens else 0.0
+        sec_ov = len(query_tokens & sec_tokens) / len(query_tokens) if sec_tokens else 0.0
+        combined = 0.70 * text_ov + 0.30 * sec_ov
+        p["query_score"] = round(combined, 4)
+        scored.append((combined, p))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [p for _, p in scored[:top_k]]
+
+
 def read_section_paragraphs(
     book_id: str, section: str, config: RAGConfig
 ) -> dict:
@@ -583,7 +896,7 @@ def read_section_paragraphs(
     Each paragraph is a non-empty line from the concatenated, overlap-stripped
     chunk text.  Returns ``{"section", "pages", "paragraphs": [str, ...]}``.
     """
-    retrieval = Retrieval(config)
+    retrieval = _new_retrieval(config)
     chunks = retrieval.get_chapter_chunks(book_id, section)
     if not chunks:
         return {"section": section, "pages": "", "paragraphs": []}
@@ -618,7 +931,7 @@ def read_section(book_id: str, section: str, config: RAGConfig) -> None:
     200-char overlap between consecutive chunks, and prints the result as
     one continuous reading passage.
     """
-    retrieval = Retrieval(config)
+    retrieval = _new_retrieval(config)
     chunks = retrieval.get_chapter_chunks(book_id, section)
     if not chunks:
         print(f"No text found for section '{section}' in '{book_id}'.")
@@ -655,7 +968,7 @@ def read_section(book_id: str, section: str, config: RAGConfig) -> None:
 
 def inspect_retrieval(query: str, config: RAGConfig, book_id: str | None = None) -> None:
     """Run a retrieval query and print the results with metadata."""
-    retrieval = Retrieval(config)
+    retrieval = _new_retrieval(config)
     if book_id:
         results = retrieval.search_book(book_id, query)
     else:

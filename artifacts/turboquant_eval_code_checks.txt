@@ -1,0 +1,425 @@
+TurboQuant Eval — Book Summarizer Code Checks
+==============================================
+Date: 2026-04-21 (Iter 1) / 2026-04-22 (Iter 2 — Book Q&A appended)
+Repo: research_crew
+Scope:
+  Iter 1 — Summarization pipeline: LLM usage, chunking, windowing, and
+           where context fragmentation happens in rag/chunker.py and rag_api.py.
+  Iter 2 — Book Q&A path: evidence selection, prompt construction, and
+           whether the answer path is context-limited or retrieval-limited.
+
+
+1. SUMMARIZATION PATH (end-to-end)
+----------------------------------
+Source text (EPUB/PDF)
+  → rag/ingest.py  (pages + metadata)
+  → rag/chunker.py::detect_structure  (section boundaries)
+  → rag/chunker.py::chunk_pages       (char-sized chunks, per section)
+  → Chroma vectorstore (via rag/store.py)
+
+Summarization run (rag_cli.py summarize → rag/analysis.py::analyse_book):
+  → retrieval.get_chapter_chunks(book_id, section)        [per section]
+  → analysis.build_windows(chunks, window_size=8000,
+                           window_overlap=500)            [group chunks]
+  → analysis.select_windows(...)                          [score + MMR]
+  → Phase 1: LLMClient.generate(WINDOW_PROMPT, WINDOW_SYSTEM)
+             one call per selected window, cached by chunk-id hash
+  → Phase 2: LLMClient.generate(SECTION_PROMPT, SECTION_SYSTEM)
+             one call per section, from selected window summaries only
+  → Phase 3: LLMClient.generate(BOOK_PROMPT, BOOK_SYSTEM)
+             one call per book, from section summaries only
+  → Artifacts written to data/results/<book>/
+       window_summaries.json, selection_detail.json,
+       chapter_insights.md, book_summary.md, summary_meta.json
+
+LLM client:
+  rag/llm.py::LLMClient — thin wrapper over Ollama /api/chat
+  Defaults: model=llama3.1, base_url=http://localhost:11434
+  Single method: generate(prompt, system) — no temperature, no max_tokens,
+  no retry/backoff (TODO noted in-file).
+
+
+2. CHUNKING PARAMETERS (rag_config.yaml / rag/config.py)
+--------------------------------------------------------
+ChunkingConfig:        target_size=1500, overlap=200,
+                       min_chunk_size=100, max_chunk_size=2000
+SummarizationConfig:   window_size=8000, window_overlap=500
+                       budgets: fast=3, default=6, thorough=99
+                       selection_strategy=content_diversity, mmr_lambda=0.7
+
+
+3. CONTEXT FRAGMENTATION — rag/chunker.py
+-----------------------------------------
+F1. Section-bounded chunking (chunk_pages, ~line 308-355)
+    Chunks NEVER bridge section boundaries. If detect_structure mis-splits
+    a chapter (bare-number heuristic, bad "Introduction" split, TOC cluster
+    dropped), arguments that span the (phantom) boundary are severed and
+    never co-occur in any window.
+
+F2. Page-joining glue (chunk_pages, line 318)
+      full_text += p.text + "\n"
+    A single "\n" between pages means paragraphs straddling a page break
+    are joined by just a newline, which _split_into_segments then treats as
+    a line boundary. Can fuse the tail of one paragraph with the header of
+    the next, or conversely split a sentence that wrapped across pages.
+
+F3. Multi-strategy segmentation (_split_into_segments, ~line 673)
+    Order: double-newline → single-line buffer flushed by sentence-end →
+    sentence-split → whole-text fallback. PDFs routinely land in strategy 2,
+    where `if len(buf) > 150 and sentence-end ...` triggers a flush. Short
+    exemplary sentences (<150 chars) are MERGED into whatever buffer is open,
+    which can cross paragraph/speaker/framework boundaries silently.
+
+F4. Soft flush in _split_text (~line 746-749)
+    When `len(current) + seg + 1 > target_size (1500)`, current chunk is
+    flushed. A single long segment (>1500 chars) becomes its own chunk only
+    AFTER its parent flush — so a dense quotation/example can land at either
+    end of its chunk depending on arrival order, giving variable context.
+
+F5. Char-offset drift (_split_text, line 756)
+      offset += seg_len + 1
+    `offset` tracks segment-length sums, not positions in the original
+    `full_text`. The chunk's (start, end) fields and page_range derived via
+    _page_at are an APPROXIMATION; any segment rewriting (whitespace
+    collapsing inside segmentation) makes offsets drift from true source
+    positions. Page attribution can be off-by-one, especially near page
+    breaks.
+
+F6. Hard character splits (_force_split_and_append, ~line 774-784)
+    For text without sentence boundaries (indexes, glossaries, run-on
+    walls) chunks are CUT mid-word at `max_size=2000` with `overlap=200`.
+    Not used for body prose usually, but when sentence detection fails
+    (unusual punctuation, OCR artefacts) it silently activates.
+
+F7. Overlap-carry between chunks (_flush, ~line 741-744)
+      overlap_text = current[-config.overlap:]
+    The trailing 200 chars of chunk N become the leading 200 chars of
+    chunk N+1. Every chunk therefore contains repeated text at both ends.
+    Downstream, when analysis.py concatenates chunks into a window with
+    `"\n\n".join(...)`, the overlapping text appears TWICE in a row —
+    roughly (overlap*2) bytes of duplication per chunk boundary inside
+    each window. This bloats prompts and dilutes LLM attention.
+
+F8. Heading detection misses (~line 105-155, _resolve_bare_numbers)
+    - `_resolve_bare_numbers` only inspects the SAME page for the title
+      line; books where "1" and "A Lopsided Arms Race" span pages lose
+      the title → fallback label "Chapter 1" (sections still named, but
+      parent/child mapping for parts may break).
+    - `_is_sentence` rejects any line with >8 words or a comma. Real
+      subtitled headings like "Introduction: A Small Experiment in Solitude"
+      (10+ words after cleanup) can be dropped before pattern matching.
+    - `_remove_toc_clusters` removes any 5+ headings within 2 pages; books
+      with a dense mini-TOC at the start of each part will have those
+      part markers deleted, fusing parts into one supersection.
+
+
+4. CONTEXT FRAGMENTATION — rag_api.py
+-------------------------------------
+F9. HTML read-at-import (line 25)
+      _UI_HTML = (Path(__file__).parent / "rag_ui.html").read_text()
+    Not a summarization issue directly, but confirms the process-model:
+    any code reload requires a server restart. Stale server on port 8000
+    will happily serve the old summarizer against new chunking config.
+
+F10. No chunking/windowing IN the API — endpoints read cached artifacts.
+     rag_api.py does NOT re-summarize; it serves pre-computed JSON from
+     data/results/<book_id>/ via inspect_utils.py. Therefore any upstream
+     fragmentation from chunker.py is baked in and invisible to the API.
+
+F11. Exact-match section lookup (/books/{id}/section-windows, ~line 571-598;
+     /read-section-paragraphs, ~line 500-508)
+     Endpoints key by section name into window_summaries.json and
+     selection_detail.json. Any name drift between ingest-time and
+     request-time (e.g. reingest with a slightly different chapter label)
+     silently returns an empty windows list — the UI shows a "blank"
+     section, not an error. This is not fragmentation of content, but
+     fragmentation of access to existing content.
+
+F12. LLM calls in rag_api.py (NOT summarization — Q&A + synthesis):
+     - /ideas/synthesize (line 443-497): concatenates up to 20 idea lines,
+       LLM sees a fixed list only; no access to underlying window text.
+     - ask-style endpoint (line 358-413): evidence is ranked then trimmed;
+       lower-ranked items (still potentially decisive) never reach the LLM.
+     These endpoints compound the upstream fragmentation: the model
+     summarizes ideas that were themselves extracted from section summaries
+     that were synthesized from window summaries — three layers removed
+     from raw text.
+
+
+5. WHERE THE WINDOWED LLM CALL IS MADE
+--------------------------------------
+rag/analysis.py:
+  line 554   llm = LLMClient(config.generation)
+  line 616   all_windows = build_windows(chunks, 8000, 500)
+  line 665   w_text = "\n\n".join(c.get("text", "") for c in w_chunks)
+             ^^^ concatenation — overlapping chunk tails/heads duplicated
+  line 668   prompt = WINDOW_PROMPT.format(...)
+  line 676   summary = llm.generate(prompt, system=WINDOW_SYSTEM)
+  line 713   section_summary = llm.generate(section_prompt, system=SECTION_SYSTEM)
+  line 762   book_summary = llm.generate(BOOK_PROMPT, system=BOOK_SYSTEM)
+
+Selection pressure:
+  - build_windows rewinds chunk-by-chunk for overlap — effective overlap
+    is "as many trailing chunks as fit under 500 chars". If chunks are
+    typically 1500 chars, real overlap between adjacent windows is ~0
+    chunks (none fit). Configured window_overlap=500 is therefore often
+    inoperative — adjacent windows can have ZERO shared text.
+  - Non-selected windows (score + MMR filter) never reach the LLM. At
+    budget_default=6 windows/section, a long chapter (say 40 windows)
+    has 34 windows' worth of content NEVER SEEN by any summary step.
+
+
+6. VALIDATION PERFORMED
+-----------------------
+- Syntax-checked chunker.py and rag_api.py via inspection (no edits made).
+- Traced import graph: rag_cli.py → rag/analysis.py → rag/llm.py + rag/chunker.py
+  matches README/CLAUDE.md description.
+- Confirmed LLM touchpoints exclusively route through rag/llm.py::LLMClient
+  (grep: 2 call-sites in rag_api.py, 3 in rag/analysis.py, 1 in rag/critic.py,
+  plus synthesis/curation modules for derived artifacts).
+- No test runs performed — pytest not installed per CLAUDE.md; this step
+  is a read-only inspection per the task spec.
+
+
+7. TOP-3 FRAGMENTATION RISKS (ranked)
+-------------------------------------
+R1. MMR window selection silently discards the majority of non-first/
+    non-last windows in long chapters. Section summary is a lossy
+    synthesis of ~15% of the chapter's windows at budget=6.
+R2. Overlap duplication inside windows (F7 + line 665 concat) inflates
+    prompts with repeated text, reducing effective context budget and
+    biasing the LLM toward boundary-repeated phrases.
+R3. Configured window_overlap=500 is often inoperative because overlap
+    is rewound in whole-chunk units — adjacent windows may share zero
+    bytes when chunks exceed 500 chars (F5 + build_windows loop).
+
+End of checks.
+
+
+=========================================================================
+ITERATION 2 — BOOK Q&A PATH
+=========================================================================
+
+8. BOOK Q&A PATH (end-to-end)
+-----------------------------
+Entrypoint: POST /books/{book_id}/ask   (rag_api.py:300-413)
+Body: { "question": str, "top_k": int (default 10, capped 20),
+        "include_hidden": bool (default false) }
+
+Flow:
+  (a) _require_book(book_id)  — 404 if no chapter_insights.md
+  (b) Build candidate idea pool:
+        ideas = extract_book_ideas(book_id)          # parses window_summaries.json
+             + user_ideas (from reading_state.json)
+        _enrich_ideas_with_notes(...)                # attaches user notes
+        _enrich_ideas_with_curation(...)             # attaches pin/hide flags
+        score_book_ideas(...)                        # attaches rank_score in place
+  (c) Rank ideas:
+        selected_ideas = rank_ideas_for_query(
+            ideas, question,
+            top_k=min(body.top_k, 20),                # HARD CAP 20
+            include_hidden=include_hidden,
+        )
+        # dedup step uses Jaccard >= 0.60 on idea text tokens.
+  (d) Rank saved passages:
+        selected_passages = rank_passages_for_query(
+            passages, question, top_k=3              # HARD CAP 3
+        )
+  (e) Format evidence into numbered lines (one idea/passage per line).
+      Saved-passage `preview` is included FULL — no truncation in evidence_lines
+      (but passages are stored with a short preview at save time).
+      Ideas are appended verbatim, plus " [your note: ...]" suffix when present.
+  (f) Build single-shot prompt `prompt = f"""..."""` (rag_api.py:358-372)
+      containing: question + evidence_block + instructions.
+  (g) llm.generate(prompt, system="You are a concise book analyst...")
+      # single LLM call via rag/llm.py::LLMClient → Ollama /api/chat
+  (h) Return {answer, sources_used[], total_candidates, total_sources_used}
+
+
+9. EVIDENCE SIZE — concrete upper bounds
+----------------------------------------
+Per /ask call the model sees AT MOST:
+  - up to 20 ideas   (top_k cap; default 10)
+  - up to 3 passages (hard-coded top_k=3 in rag_api.py:337)
+  → max ~23 numbered evidence items.
+
+Per-item text length:
+  - Ideas are parsed from "**Heading**\n1. text\n2. text..." in window summaries
+    (inspect_utils.py:566). Each item is a single line — typically one
+    assertion or example. Observed length distribution is short (dozens to
+    a few hundred chars). Idea bodies are NOT truncated in `/ask`.
+  - Note text is appended in-line ("[your note: ...]") — unbounded.
+  - Saved passages carry a `preview` field set at save time; the
+    /reading-state/save POST (rag_api.py:705-753) accepts a free-form string.
+
+Rough prompt bytes at default settings:
+  evidence block ≈ 13 items × ~150 chars = ~2 KB
+  plus ~400 chars of instructions and the question.
+  Total prompt typically well under 4 KB — FAR below any Ollama context
+  limit for llama3.1 (8k–128k depending on modelfile).
+
+
+10. RELATED "EVIDENCE-SHAPED" ENDPOINTS
+---------------------------------------
+The repo has three LLM-using endpoints that all look like Q&A but differ
+in scope:
+
+  (i)  POST /books/{book_id}/ask          — single-book Q&A (above)
+  (ii) POST /ideas/synthesize             — cross-idea synthesis
+         rag_api.py:443-497
+         - Body.ideas: list of ideas (2-20, HARD CAP 20)
+         - No retrieval; the UI sends the exact ideas to synthesize.
+         - Single LLM call.
+  (iii) rag/navigation.py::trace_idea     — CLI-only idea trace
+         - Not an LLM call; walks window_summaries.json regex-matching
+           the idea string. No prompt size implications.
+
+Additionally:
+  - Summarization (rag/analysis.py) uses 3 LLM calls per section and 1
+    per book — fully documented in Iter 1 above. This is a DIFFERENT path
+    from Q&A.
+  - rag/critic.py::verify_book_summary (called from analyse_book) is a
+    post-hoc verification LLM call on the book_summary.md. Out of Q&A scope
+    but another LLM touchpoint.
+
+
+11. WHAT EVIDENCE IS INCLUDED (and what is NOT)
+-----------------------------------------------
+Included in /ask evidence block:
+  ✓ Top-N ranked "book ideas" (parsed key_claims / examples / frameworks
+    from window summaries — not free-form section prose).
+  ✓ User-authored ideas (source="user") — get a +1.0 rank_prior bonus.
+  ✓ User notes attached to ideas (appended inline in the evidence line).
+  ✓ Top-3 user-saved passages (`preview` text only).
+
+NOT included in /ask:
+  ✗ Raw book text / section prose. The model never sees the source text.
+  ✗ Window summaries (only the extracted idea lines FROM them).
+  ✗ Section summaries or book_summary.md.
+  ✗ Chapter structure, page refs (unless baked into an idea's own text as
+    "[p.N]" by the summarizer prompt).
+  ✗ Ideas from OTHER books (scope is per-book_id).
+  ✗ Cross-book saved items (even though /saved-items exists).
+  ✗ Ideas flagged `hidden` (unless include_hidden=true; then still penalized
+    −0.5 so they rarely surface).
+
+This is a "distilled-evidence" Q&A design, not a full-context RAG design.
+
+
+12. WHERE CONTEXT SIZE IS DETERMINED (code map)
+-----------------------------------------------
+- top_k for ideas:            rag_api.py:329   top_k = min(body.top_k, 20)
+- top_k for passages:          rag_api.py:337   hard-coded 3
+- dedup threshold (Jaccard):   inspect_utils.py:830   >= 0.60
+- hidden-policy default:       rag_api.py:330   include_hidden=False
+- near_dup penalty:            inspect_utils.py:784   −0.15
+- LLM call / context handoff:  rag_api.py:377-380
+- LLM transport:               rag/llm.py:29-34
+  (no max_tokens, no num_ctx override on the Ollama request — Ollama uses
+   the model's Modelfile-defined context length.)
+
+No place in the /ask path computes or enforces a byte/token budget before
+the LLM call. The only limits on evidence size are top_k caps and the
+per-item implicit lengths.
+
+
+13. CONTEXT-LIMITED vs RETRIEVAL-LIMITED — VERDICT
+--------------------------------------------------
+The /ask path is RETRIEVAL-LIMITED, not context-limited.
+
+Evidence for "retrieval-limited":
+  R1. The pool from which evidence is drawn is ~ few hundred extracted
+      idea lines per book (window_summaries.json yields typically 6–40
+      windows × 3–5 items per window = low hundreds). The LLM sees a
+      20-idea slice of this. The BULK of the book (section prose, summary
+      prose, non-idea heading types like actionable takeaways — which
+      extract_book_ideas skips via _IDEA_HEADING_MAP) is NEVER a candidate.
+  R2. Ranking is pure bag-of-words token overlap + curated priors
+      (rank_ideas_for_query, lines 746-794). No embeddings, no semantic
+      match, no query rewriting. A paraphrased question against a
+      differently-worded idea will miss.
+  R3. Saved passages top_k is hard-coded 3 — a request to surface "all
+      passages I saved about X" is impossible via /ask today.
+  R4. Dedup at Jaccard 0.60 can eject ideas that overlap lexically but
+      carry different nuance. (Backfill exists but only fires if <top_k
+      non-dupes.)
+  R5. The retrieval boundary is book-scoped; cross-book synthesis is only
+      reachable via the separate /ideas/synthesize endpoint which requires
+      the caller to pre-select ideas (no retrieval at all).
+
+Evidence AGAINST "context-limited":
+  C1. At default top_k=10 + 3 passages, the prompt is on the order of
+      2 KB. Even at max (20 + 3), a few KB. llama3.1 at default Modelfile
+      context (≥ 8k tokens ≈ ~32 KB) has headroom ~10×.
+  C2. No code path truncates evidence to fit a context window — truncation
+      would appear in rag_api.py:340-352 or rag/llm.py, and there is none.
+  C3. Near-duplicate penalty and top_k trimming are QUALITY choices, not
+      space choices. Raising top_k to 50 would not break any context limit
+      at today's per-item sizes.
+
+Nuance — a larger context would help ONLY if retrieval first got better:
+  - If ranking became semantic (embedding-based) so the top 50 items were
+    reliably relevant, THEN sending 50 instead of 10 might measurably help.
+  - With current lexical ranking, raising top_k mostly admits noise
+    (irrelevant items with incidental word overlap) which hurts answers,
+    not helps.
+
+
+14. PROMPT-CONSTRUCTION FRAGMENTATION (Q&A side)
+------------------------------------------------
+Notable quirks that survive into the Q&A prompt:
+
+Q1. Ideas are flattened into one line each with source-tags
+    "[your idea/key_idea]" / "[your note: ...]" but no page/window ref.
+    The model cannot cite back to page numbers unless the idea's own text
+    contains "[p.N]" (only present if the window summarizer included it).
+
+Q2. No provenance to section summaries or section prose — if the true
+    answer to a question is in a SECTION SUMMARY but not in any extracted
+    idea heading, the model cannot reach it. (Actionable takeaways are
+    deliberately excluded by _IDEA_HEADING_MAP.)
+
+Q3. Saved passages are included with full `preview`, but `preview` length
+    is set at save time (POST /reading-state/save accepts arbitrary string).
+    A very long saved preview plus 20 ideas could bloat the prompt, but
+    still won't pressure an 8k-token window.
+
+Q4. Evidence is renumbered 1..N inline. If the user asks follow-up
+    questions, numbering changes between calls — citations aren't stable.
+
+Q5. The rank_score quality prior (weight 0.20) is derived from the WINDOW
+    score computed during summarization (inspect_utils.py:593-609). That
+    score reflects summarization-time saliency, not Q&A-time relevance,
+    and it multiplies through to every query.
+
+
+15. VALIDATION PERFORMED (Iter 2)
+---------------------------------
+- Read rag_api.py:300-413 (ask endpoint) end-to-end.
+- Read rag/inspect_utils.py:537-900 covering extract_book_ideas,
+  score_book_ideas, rank_ideas_for_query, rank_passages_for_query.
+- Confirmed no second LLM call in /ask (single prompt → single answer).
+- Confirmed no context-budget computation anywhere in the /ask path.
+- Confirmed hard caps: top_k ideas ≤ 20, top_k passages = 3.
+- Confirmed retrieval uses bag-of-words + curated priors (no embeddings).
+- No code was modified in this iteration; inspection only.
+
+
+16. KEY QUESTIONS → ANSWERED
+----------------------------
+Q:  How much evidence does Book Q&A actually show the model at once?
+A:  Up to 20 extracted "idea" lines + up to 3 saved passage previews —
+    in practice a few KB, well below any plausible context limit.
+
+Q:  Is the answer path context-limited or retrieval-limited?
+A:  Retrieval-limited. Evidence is bounded by top_k and lexical ranking
+    quality, not by prompt/context size. The model sees only distilled
+    idea bullets — never section text or summaries.
+
+Q:  Would more context help /ask today?
+A:  Not directly. Raising top_k without improving ranking admits noise.
+    Net impact is likely neutral-to-negative until retrieval quality
+    improves (e.g., embedding-based ranking, semantic dedup, inclusion of
+    section-summary prose as a candidate tier).
+
+End of Iteration 2 Q&A code checks.

@@ -395,7 +395,8 @@
       padding: 20px 18px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
       font-size: 0.92rem;
-      line-height: 1.75;
+      --reader-lh: 1.75;
+      line-height: var(--reader-lh);
       color: var(--text);
       overflow-wrap: break-word;
       word-break: break-word;
@@ -413,13 +414,150 @@
       user-select: text;
     }
     .reader-para.para-read {
-      background: rgba(22, 163, 74, 0.08);
+      background: rgba(22, 163, 74, 0.18);
     }
     @media (prefers-color-scheme: dark) {
       .reader-para.para-read {
-        background: rgba(74, 222, 128, 0.08);
+        background: rgba(74, 222, 128, 0.15);
       }
     }
+
+    /* ── Passage save button ────────────────────────────────────────── */
+    .reader-para { position: relative; }
+    .para-save-btn {
+      position: absolute;
+      right: 2px;
+      top: 4px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 0.82rem;
+      color: var(--text3);
+      padding: 4px 7px;
+      border-radius: 4px;
+      opacity: 0.55;
+      transition: opacity 0.15s, color 0.15s, background 0.15s;
+    }
+    .para-save-btn:hover { opacity: 1; background: var(--bg2); }
+    .para-save-btn.is-saved { opacity: 1; color: #d97706; }
+    @media (prefers-color-scheme: dark) {
+      .para-save-btn.is-saved { color: #fbbf24; }
+    }
+    .reader-para.para-highlight {
+      background: rgba(37, 99, 235, 0.12);
+      transition: background 1.5s ease-out;
+    }
+    @media (prefers-color-scheme: dark) {
+      .reader-para.para-highlight { background: rgba(59, 130, 246, 0.15); }
+    }
+
+    /* ── Reading style modes ─────────────────────────────────────────── */
+    .reader-styles {
+      display: none;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 10px;
+      padding: 8px 0 4px;
+    }
+    .reader-styles.visible { display: flex; }
+    .rs-chip {
+      font-size: 0.72rem;
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg);
+      color: var(--text2);
+      cursor: pointer;
+      font-family: inherit;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .rs-chip:active { background: var(--bg3); }
+    .rs-chip.active { border-color: var(--accent); color: var(--accent); }
+    .rs-label {
+      font-size: 0.68rem;
+      color: var(--text3);
+      align-self: center;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-weight: 600;
+    }
+
+    /* Bionic reading — bold first portion of words */
+    .bionic-b { font-weight: 700; }
+
+    /* Font: Lexend */
+    .reader-output.reader-font-lexend {
+      font-family: 'Lexend', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    /* Font: OpenDyslexic */
+    .reader-output.reader-font-opendyslexic {
+      font-family: 'OpenDyslexic', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 0.88rem;
+    }
+
+    /* BeeLine: alternating line-color bands for eye tracking.
+       --bl-line is one line's height: line-height * font-size.
+       We set it on .reader-output so .reader-para inherits it. */
+    .reader-output.reader-beeline {
+      --bl-line: calc(var(--reader-lh) * 0.92rem);
+    }
+    .reader-output.reader-beeline .reader-para {
+      background-image: repeating-linear-gradient(
+        to bottom,
+        rgba(37, 99, 235, 0.10) 0px,
+        rgba(37, 99, 235, 0.10) var(--bl-line),
+        rgba(22, 163, 74, 0.08) var(--bl-line),
+        rgba(22, 163, 74, 0.08) calc(var(--bl-line) * 2)
+      );
+      background-size: 100% calc(var(--bl-line) * 2);
+      background-position: 0 0;
+    }
+    @media (prefers-color-scheme: dark) {
+      .reader-output.reader-beeline .reader-para {
+        background-image: repeating-linear-gradient(
+          to bottom,
+          rgba(96, 165, 250, 0.12) 0px,
+          rgba(96, 165, 250, 0.12) var(--bl-line),
+          rgba(74, 222, 128, 0.10) var(--bl-line),
+          rgba(74, 222, 128, 0.10) calc(var(--bl-line) * 2)
+        );
+      }
+    }
+    /* Preserve para-read background over beeline */
+    .reader-output.reader-beeline .reader-para.para-read {
+      background-color: rgba(22, 163, 74, 0.08);
+    }
+
+    /* Spacing: relaxed */
+    .reader-output.reader-spacing-relaxed {
+      --reader-lh: 2.1;
+      line-height: var(--reader-lh);
+      letter-spacing: 0.015em;
+      word-spacing: 0.05em;
+    }
+
+    /* ── Saved passages panel ────────────────────────────────────────── */
+    #passages-card { display: none; }
+    .passage-item {
+      display: block;
+      width: 100%;
+      padding: 9px 12px;
+      margin-bottom: 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font: inherit;
+      font-size: 0.85rem;
+      cursor: pointer;
+      color: var(--text);
+      text-align: left;
+    }
+    .passage-item:last-child { margin-bottom: 0; }
+    .passage-item:active { background: var(--bg3); }
+    .passage-hd { display: flex; align-items: baseline; gap: 8px; margin-bottom: 2px; }
+    .passage-book { font-size: 0.82rem; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .passage-sec { font-size: 0.72rem; color: var(--text2); flex-shrink: 0; }
+    .passage-preview { font-size: 0.78rem; color: var(--text3); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 
     /* ── Reading state ───────────────────────────────────────────────── */
     /* Bookmarks */
@@ -636,6 +774,29 @@
     #add-idea-form select { appearance: auto; }
     .add-idea-row { display: flex; gap: 8px; }
     .add-idea-row > * { flex: 1; }
+    .idea-note-btn {
+      font-size: 0.75rem; background: none; border: none; cursor: pointer;
+      color: var(--text3); padding: 0 3px; font-family: inherit; vertical-align: middle;
+    }
+    .idea-note-btn.has-note { color: #d97706; }
+    @media (prefers-color-scheme: dark) { .idea-note-btn.has-note { color: #fbbf24; } }
+    .idea-curate-btn {
+      font-size: 0.8rem; background: none; border: none; cursor: pointer;
+      color: var(--text3); padding: 0 3px; font-family: inherit; vertical-align: middle;
+    }
+    .idea-curate-btn.is-on { color: var(--accent); }
+    .idea-row.is-pinned { background: var(--bg2); border-left: 3px solid var(--accent); }
+    .idea-row.is-hidden { opacity: 0.55; }
+    .idea-dup-badge {
+      display: inline-block; font-size: 0.65rem; padding: 0 5px; margin-right: 4px;
+      border-radius: 3px; color: var(--text3); background: var(--bg2);
+      vertical-align: middle;
+    }
+    .idea-note-preview {
+      display: block; font-size: 0.72rem; color: var(--text2);
+      font-style: italic; margin-top: 2px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
 
     /* ── Idea selection + synthesis ───────────────────────────────────── */
     .idea-check {
@@ -684,6 +845,191 @@
     }
     .synth-src-item:active { background: var(--bg3); }
     .synth-src-meta { font-size: 0.7rem; color: var(--text3); display: block; margin-top: 2px; }
+
+    /* ── Idea ranking toggle ─────────────────────────────────────────── */
+    .ideas-filter-toggle {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 2px 10px;
+      margin-left: 8px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--bg);
+      color: var(--text2);
+      cursor: pointer;
+      vertical-align: middle;
+    }
+    .ideas-filter-toggle.active { border-color: var(--accent); color: var(--accent); }
+    .idea-show-more {
+      font-size: 0.78rem;
+      color: var(--accent);
+      cursor: pointer;
+      padding: 4px 0 8px 28px;
+    }
+    .idea-show-more:active { opacity: 0.6; }
+
+    /* ── Idea detail (drill-down) ────────────────────────────────────── */
+    .idea-detail {
+      margin: -4px 0 10px 28px;
+      padding: 10px 12px;
+      border-left: 2px solid var(--accent);
+      background: var(--bg2);
+      border-radius: 0 6px 6px 0;
+      font-size: 0.85rem;
+      color: var(--text);
+    }
+    .idea-detail-heading {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text3);
+      margin: 8px 0 4px;
+    }
+    .idea-detail-text { font-weight: 500; line-height: 1.35; }
+    .idea-detail-meta {
+      font-size: 0.75rem;
+      color: var(--text3);
+      margin-top: 4px;
+    }
+    .idea-detail-jump {
+      color: var(--accent);
+      cursor: pointer;
+      margin-left: 6px;
+    }
+    .idea-detail-jump:active { opacity: 0.6; }
+    .idea-detail-examples { margin: 4px 0 2px; padding: 0; list-style: none; }
+    .idea-detail-example {
+      padding: 6px 8px;
+      margin: 4px 0;
+      background: var(--bg);
+      border-radius: 4px;
+      line-height: 1.3;
+    }
+    .idea-detail-example.is-clickable {
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+    .idea-detail-example.is-clickable:hover { background: var(--bg3); }
+    .idea-detail-example.is-clickable:active { opacity: 0.7; }
+    .idea-detail-example-sec {
+      display: block;
+      font-size: 0.7rem;
+      color: var(--text3);
+      margin-top: 2px;
+    }
+    .idea-detail-empty {
+      font-size: 0.78rem;
+      color: var(--text3);
+      font-style: italic;
+    }
+
+    /* ── Ranked examples panel ───────────────────────────────────────── */
+    #book-examples-panel { display: none; }
+    .example-row {
+      display: block;
+      width: 100%;
+      padding: 10px 12px;
+      margin-bottom: 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      text-align: left;
+      cursor: pointer;
+      color: var(--text);
+      font: inherit;
+      font-size: 0.85rem;
+      line-height: 1.45;
+      transition: border-color 0.15s;
+    }
+    .example-row:active { background: var(--bg3); }
+    .example-row:last-child { margin-bottom: 0; }
+    .example-rank {
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: var(--accent);
+      margin-right: 6px;
+    }
+    .example-score {
+      float: right;
+      font-size: 0.72rem;
+      color: var(--text3);
+      margin-left: 8px;
+    }
+    .example-text {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+    }
+    .example-meta {
+      display: block;
+      font-size: 0.72rem;
+      color: var(--text3);
+      margin-top: 4px;
+    }
+    .example-detail {
+      margin: -1px 0 10px 0;
+      padding: 12px;
+      border-left: 2px solid var(--accent);
+      background: var(--bg2);
+      border-radius: 0 6px 6px 0;
+      font-size: 0.85rem;
+      color: var(--text);
+    }
+    .example-detail-text { font-weight: 500; line-height: 1.5; }
+    .example-detail-source {
+      margin-top: 8px;
+      font-size: 0.76rem;
+      color: var(--text3);
+    }
+    .example-detail-source button,
+    .example-idea-link {
+      color: var(--accent);
+      background: none;
+      border: none;
+      padding: 0;
+      font: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+    .example-detail-source button:active,
+    .example-idea-link:active { opacity: 0.65; }
+    .example-idea-list {
+      margin-top: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .example-idea-item {
+      padding: 7px 8px;
+      background: var(--bg);
+      border-radius: 5px;
+      line-height: 1.35;
+    }
+    .example-idea-meta {
+      display: block;
+      margin-top: 2px;
+      font-size: 0.7rem;
+      color: var(--text3);
+    }
+
+    /* ── Ask this book ───────────────────────────────────────────────── */
+    #ask-book-form {
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+    .ask-book-label {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: var(--text2);
+      margin-bottom: 6px;
+    }
+    #ask-wrap { margin-top: 10px; }
 
     /* ── Cross-book ideas ────────────────────────────────────────────── */
     .xb-book-heading {
@@ -779,6 +1125,13 @@
     </div>
   </div>
 
+  <!-- ── Saved passages (global) ──────────────────────────────────── -->
+  <div class="card" id="passages-card">
+    <h2>Saved passages</h2>
+    <p class="hint" id="passages-empty">Save paragraphs from the section reader to collect passages across books.</p>
+    <div id="passages-list"></div>
+  </div>
+
   <!-- ── Navigation panel ───────────────────────────────────────────── -->
   <div id="nav-panel">
 
@@ -805,7 +1158,8 @@
 
     <!-- 0b. Book ideas -->
     <div class="card" id="book-ideas-panel">
-      <h2 style="cursor:pointer" onclick="document.getElementById('book-ideas-body').classList.toggle('xb-ideas-collapsed')">Ideas <span class="xb-toggle">tap to toggle</span></h2>
+      <h2 style="cursor:pointer" onclick="document.getElementById('book-ideas-body').classList.toggle('xb-ideas-collapsed')">Ideas <span class="xb-toggle">tap to toggle</span>
+        <span id="ideas-top-toggle" class="ideas-filter-toggle active" onclick="event.stopPropagation();toggleIdeasTopOnly()">Top only</span></h2>
       <div id="book-ideas-body" class="xb-ideas-collapsed">
       <p class="hint" id="book-ideas-empty">No ideas found for this book.</p>
       <div id="book-ideas-list"></div>
@@ -828,7 +1182,27 @@
         <input type="text" id="add-idea-text" placeholder="Your idea…">
         <button class="btn-run" onclick="submitUserIdea()">Add idea</button>
       </div>
+      <div id="ask-book-form">
+        <div class="ask-book-label">Ask this book</div>
+        <div style="display:flex;gap:6px">
+          <input type="text" id="ask-book-input" placeholder="Ask a question about this book…" style="flex:1"
+            onkeydown="if(event.key==='Enter')askBook()">
+          <button class="btn-run" onclick="askBook()">Ask</button>
+        </div>
+      </div>
+      <div class="output-wrap" id="ask-wrap">
+        <div class="synth-output" id="ask-out"></div>
+      </div>
       </div><!-- /book-ideas-body -->
+    </div>
+
+    <!-- 0c. Ranked examples -->
+    <div class="card" id="book-examples-panel">
+      <h2 style="cursor:pointer" onclick="document.getElementById('book-examples-body').classList.toggle('xb-ideas-collapsed')">Examples <span class="xb-toggle">tap to toggle</span></h2>
+      <div id="book-examples-body" class="xb-ideas-collapsed">
+        <p class="hint" id="book-examples-empty">No ranked examples found for this book.</p>
+        <div id="book-examples-list"></div>
+      </div>
     </div>
 
     <!-- 1. Fiction panel (shown only when fiction data available) -->
@@ -903,6 +1277,14 @@
       </div>
       <p class="hint">Full continuous text with overlap removed. Double-tap a paragraph to mark progress.</p>
       <button class="btn-run" onclick="runReadSection()">Read section</button>
+      <div class="reader-styles" id="reader-styles">
+        <span class="rs-label">Style</span>
+        <button class="rs-chip" data-rs="bionic" onclick="toggleReaderStyle('bionic')">Bionic</button>
+        <button class="rs-chip" data-rs="font-lexend" onclick="setReaderFont('lexend')">Lexend</button>
+        <button class="rs-chip" data-rs="font-opendyslexic" onclick="setReaderFont('opendyslexic')">OpenDyslexic</button>
+        <button class="rs-chip" data-rs="beeline" onclick="toggleReaderStyle('beeline')">BeeLine</button>
+        <button class="rs-chip" data-rs="spacing" onclick="toggleReaderStyle('spacing')">Relaxed</button>
+      </div>
       <div class="output-wrap" id="reader-wrap">
         <div class="reader-output" id="reader-out"></div>
         <p class="hint" id="reader-progress-hint" style="margin-top:8px;display:none"></p>
@@ -958,7 +1340,7 @@
     let _inspectAllWindows = false;
 
     // Reading state (includes bookmarks and saved items)
-    let _readState = { read_windows: [], last_read_window: null, last_read_section: null, bookmarks: [], saved_items: [] };
+    let _readState = { read_windows: [], last_read_window: null, last_read_section: null, bookmarks: [], saved_items: [], saved_passages: [] };
 
     // Preview text from last inspect result (used when saving a window)
     let _inspectPreview = null;
@@ -996,11 +1378,12 @@
       checkFiction(id);
       loadReadingState(id);
       loadBookIdeas(id);
+      loadBookExamples(id);
       window.scrollTo({ top: document.getElementById('nav-panel').offsetTop - 8, behavior: 'smooth' });
     }
 
     function clearOutputs() {
-      ['trace-wrap','explore-wrap','inspect-wrap','whois-wrap','diff-wrap','reader-wrap','synth-wrap'].forEach(id => {
+      ['trace-wrap','explore-wrap','inspect-wrap','whois-wrap','diff-wrap','reader-wrap','synth-wrap','ask-wrap'].forEach(id => {
         document.getElementById(id).classList.remove('visible');
       });
       document.getElementById('inspect-nav').style.display = 'none';
@@ -1302,9 +1685,10 @@
             const isUser = it.source === 'user';
             const badge = isUser ? '<span class="idea-user-badge">you</span>' : '';
             const checked = _xbSelectedIdxs.has(it._idx) ? ' checked' : '';
+            const noteBtn = ideaNoteHtml(it);
             return `<div class="idea-row" onclick="xbTapIdea(${JSON.stringify(it.book_id)},${JSON.stringify(it.section||'')})">` +
               `<input type="checkbox" class="idea-check"${checked} onclick="event.stopPropagation();toggleXbSelect(${it._idx},this.checked)">` +
-              `<div class="idea-row-text">${badge}${esc(it.text)}` +
+              `<div class="idea-row-text">${noteBtn}${badge}${esc(it.text)}` +
               `${it.section ? `<span class="idea-row-sec">${esc(it.section)}</span>` : ''}</div></div>`;
           }).join('');
         }
@@ -1416,12 +1800,148 @@
       }
     }
 
-    /* ── Fiction availability ────────────────────────────────────────── */
+    /* ── Idea notes ──────────────────────────────────────────────────── */
+    function ideaNoteHtml(it) {
+      const hasNote = !!it.note;
+      const noteKey = esc(it.note_key || '');
+      const bid = esc(it.book_id || bookId || '');
+      const icon = hasNote ? '&#9998;' : '&#9998;';
+      const preview = hasNote ? `<span class="idea-note-preview">${esc(it.note)}</span>` : '';
+      return `<span class="idea-note-btn${hasNote ? ' has-note' : ''}" ` +
+        `onclick="event.stopPropagation();editIdeaNote('${bid}','${noteKey}',${JSON.stringify(it.note||'')})" ` +
+        `title="${hasNote ? 'Edit note' : 'Add note'}">${icon}</span>${preview}`;
+    }
+
+    async function editIdeaNote(bid, noteKey, current) {
+      const text = prompt('Note for this idea:', current || '');
+      if (text === null) return;  // cancelled
+      try {
+        const params = new URLSearchParams({ text });
+        await fetch(`/books/${encodeURIComponent(bid)}/idea-notes/${encodeURIComponent(noteKey)}?${params}`,
+          { method: 'PUT' });
+        // Reload both views
+        if (bookId) loadBookIdeas(bookId);
+        loadAllIdeas();
+      } catch (e) {}
+    }
+
     /* ── Book ideas ──────────────────────────────────────────────────── */
     const _IDEA_TYPE_LABELS = {key_idea: 'Key Ideas', example: 'Examples', framework: 'Frameworks'};
     const _IDEA_TYPE_ORDER  = ['key_idea', 'example', 'framework'];
+    const _IDEAS_TOP_N = 5;
     let _allIdeas = [];
     let _selectedIdxs = new Set();
+    let _ideasTopOnly = true;
+
+    function toggleIdeasTopOnly() {
+      _ideasTopOnly = !_ideasTopOnly;
+      const btn = document.getElementById('ideas-top-toggle');
+      if (btn) {
+        btn.textContent = _ideasTopOnly ? 'Top only' : 'All';
+        btn.classList.toggle('active', _ideasTopOnly);
+      }
+      renderBookIdeas();
+    }
+
+    function renderBookIdeas() {
+      const list = document.getElementById('book-ideas-list');
+      if (!_allIdeas.length) return;
+
+      const indexed = _allIdeas.map((it, i) => ({...it, _idx: i}));
+      const grouped = {};
+      for (const it of indexed) {
+        (grouped[it.type] = grouped[it.type] || []).push(it);
+      }
+      // Sort each group: pinned first, hidden last, then rank_score descending.
+      for (const arr of Object.values(grouped)) {
+        arr.sort((a, b) => {
+          const pa = a.pinned ? 1 : 0;
+          const pb = b.pinned ? 1 : 0;
+          if (pa !== pb) return pb - pa;
+          const ha = a.hidden ? 1 : 0;
+          const hb = b.hidden ? 1 : 0;
+          if (ha !== hb) return ha - hb;
+          return (b.rank_score || 0) - (a.rank_score || 0);
+        });
+      }
+
+      let html = '';
+      for (const t of _IDEA_TYPE_ORDER) {
+        const arr = grouped[t];
+        if (!arr || !arr.length) continue;
+
+        // User-authored always shown; generated may be limited.
+        // In default (top-only) view, hidden and near-duplicate generated ideas
+        // are excluded. Pinned generated ideas override suppression.
+        const userIdeas = arr.filter(it => it.source === 'user');
+        const genAll    = arr.filter(it => it.source !== 'user');
+        const genVisible = _ideasTopOnly
+          ? genAll.filter(it => it.pinned || (!it.hidden && !it.near_dup))
+          : genAll;
+        let shownGen;
+        if (_ideasTopOnly) {
+          const pinned = genVisible.filter(it => it.pinned);
+          const rest   = genVisible.filter(it => !it.pinned);
+          shownGen = [...pinned, ...rest.slice(0, Math.max(0, _IDEAS_TOP_N - pinned.length))];
+        } else {
+          shownGen = genVisible;
+        }
+        const allShown  = [...userIdeas, ...shownGen];
+        const hiddenCount = genAll.length - shownGen.length;
+
+        const countLabel = _ideasTopOnly && hiddenCount > 0
+          ? `${allShown.length} of ${arr.length}` : `${arr.length}`;
+        html += `<div class="idea-type-heading">${_IDEA_TYPE_LABELS[t] || t} (${countLabel})</div>`;
+
+        html += allShown.map(it => {
+          const isUser = it.source === 'user';
+          const badge = isUser ? '<span class="idea-user-badge">you</span>' : '';
+          const del = isUser && it.id !== undefined
+            ? `<span class="idea-del" onclick="event.stopPropagation();deleteUserIdea(${it.id})">✕</span>` : '';
+          const noteBtn = ideaNoteHtml(it);
+          const curateBtns = ideaCurationHtml(it);
+          const dupBadge = it.near_dup && !it.pinned ? '<span class="idea-dup-badge" title="Near-duplicate of a higher-ranked idea">dup</span>' : '';
+          const rowCls = 'idea-row' + (it.pinned ? ' is-pinned' : '') + (it.hidden ? ' is-hidden' : '');
+          return `<div class="${rowCls}" onclick="toggleIdeaDetail(${it._idx})">` +
+            `<input type="checkbox" class="idea-check" data-idx="${it._idx}" onclick="event.stopPropagation();toggleIdeaSelect(${it._idx}, this.checked)">` +
+            `<div class="idea-row-text">${del}${noteBtn}${curateBtns}${dupBadge}${badge}${esc(it.text)}` +
+            `${it.section ? `<span class="idea-row-sec">${esc(it.section)}</span>` : ''}</div></div>` +
+            `<div class="idea-detail" id="idea-detail-${it._idx}" style="display:none"></div>`;
+        }).join('');
+
+        if (_ideasTopOnly && hiddenCount > 0) {
+          html += `<div class="idea-show-more" onclick="_ideasTopOnly=false;document.getElementById('ideas-top-toggle').textContent='All';document.getElementById('ideas-top-toggle').classList.remove('active');renderBookIdeas()">Show ${hiddenCount} more\u2026</div>`;
+        }
+      }
+      list.innerHTML = html;
+    }
+
+    /* ── Idea curation (pin/hide) ────────────────────────────────────── */
+    function ideaCurationHtml(it) {
+      if (it.source === 'user') return '';
+      const bid = esc(it.book_id || bookId || '');
+      const key = esc(it.note_key || '');
+      const pinOn  = it.pinned  ? ' is-on' : '';
+      const hideOn = it.hidden  ? ' is-on' : '';
+      const pinAction  = it.pinned  ? 'unpin'  : 'pin';
+      const hideAction = it.hidden  ? 'unhide' : 'hide';
+      const pinTitle  = it.pinned  ? 'Unpin idea'  : 'Pin to top';
+      const hideTitle = it.hidden  ? 'Unhide idea' : 'Hide from default view';
+      return `<span class="idea-curate-btn${pinOn}" title="${pinTitle}" ` +
+        `onclick="event.stopPropagation();toggleCuration('${bid}','${key}','${pinAction}')">&#128204;</span>` +
+        `<span class="idea-curate-btn${hideOn}" title="${hideTitle}" ` +
+        `onclick="event.stopPropagation();toggleCuration('${bid}','${key}','${hideAction}')">&#128683;</span>`;
+    }
+
+    async function toggleCuration(bid, ideaId, action) {
+      if (!bid || !ideaId) return;
+      try {
+        const params = new URLSearchParams({ idea_id: ideaId, action });
+        const r = await fetch(`/books/${encodeURIComponent(bid)}/curation?${params}`, { method: 'POST' });
+        if (!r.ok) return;
+        if (bookId) loadBookIdeas(bookId);
+      } catch (e) {}
+    }
 
     async function loadBookIdeas(id) {
       const panel = document.getElementById('book-ideas-panel');
@@ -1442,29 +1962,7 @@
           return;
         }
         empty.style.display = 'none';
-        // Assign a flat index to each idea for selection tracking
-        const indexed = _allIdeas.map((it, i) => ({...it, _idx: i}));
-        const grouped = {};
-        for (const it of indexed) {
-          (grouped[it.type] = grouped[it.type] || []).push(it);
-        }
-        let html = '';
-        for (const t of _IDEA_TYPE_ORDER) {
-          const arr = grouped[t];
-          if (!arr || arr.length === 0) continue;
-          html += `<div class="idea-type-heading">${_IDEA_TYPE_LABELS[t] || t} (${arr.length})</div>`;
-          html += arr.map(it => {
-            const isUser = it.source === 'user';
-            const badge = isUser ? '<span class="idea-user-badge">you</span>' : '';
-            const del = isUser && it.id !== undefined
-              ? `<span class="idea-del" onclick="event.stopPropagation();deleteUserIdea(${it.id})">✕</span>` : '';
-            return `<div class="idea-row" onclick="tapIdea(${JSON.stringify(it.section || '')})">` +
-              `<input type="checkbox" class="idea-check" data-idx="${it._idx}" onclick="event.stopPropagation();toggleIdeaSelect(${it._idx}, this.checked)">` +
-              `<div class="idea-row-text">${del}${badge}${esc(it.text)}` +
-              `${it.section ? `<span class="idea-row-sec">${esc(it.section)}</span>` : ''}</div></div>`;
-          }).join('');
-        }
-        list.innerHTML = html;
+        renderBookIdeas();
       } catch (e) { list.innerHTML = ''; empty.style.display = 'block'; }
       const sec = document.getElementById('explore-section').value.trim();
       if (sec) document.getElementById('add-idea-section').value = sec;
@@ -1478,6 +1976,124 @@
       loadInspectNav(section, null);
       runExplore();
       document.getElementById('explore-wrap').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function renderIdeaDetail(it) {
+      const secJump = it.section
+        ? `<span class="idea-detail-jump" onclick="event.stopPropagation();tapIdea(${JSON.stringify(it.section).replace(/"/g, '&quot;')})">Jump to section →</span>`
+        : '';
+      const examples = Array.isArray(it.linked_examples) ? it.linked_examples : [];
+      let examplesHtml;
+      if (examples.length) {
+        examplesHtml = '<ul class="idea-detail-examples">' + examples.map(ex => {
+          const sec = ex.section
+            ? `<span class="idea-detail-example-sec">${esc(ex.section)}</span>` : '';
+          const clickable = ex.section ? ' is-clickable' : '';
+          const onclick = ex.section
+            ? ` onclick="event.stopPropagation();tapIdea(${JSON.stringify(ex.section).replace(/"/g, '&quot;')})"`
+            : '';
+          return `<li class="idea-detail-example${clickable}"${onclick}>${esc(ex.text || '')}${sec}</li>`;
+        }).join('') + '</ul>';
+      } else {
+        examplesHtml = '<div class="idea-detail-empty">No linked examples found for this idea.</div>';
+      }
+      return `<div class="idea-detail-text">${esc(it.text || '')}</div>` +
+        `<div class="idea-detail-meta">` +
+          `${it.section ? 'Section: ' + esc(it.section) : ''}${secJump}` +
+        `</div>` +
+        `<div class="idea-detail-heading">Relevant examples</div>` +
+        examplesHtml;
+    }
+
+    function toggleIdeaDetail(idx) {
+      const panel = document.getElementById(`idea-detail-${idx}`);
+      if (!panel) return;
+      const it = _allIdeas[idx];
+      if (!it) return;
+      if (panel.style.display === 'none' || !panel.innerHTML) {
+        panel.innerHTML = renderIdeaDetail(it);
+        panel.style.display = 'block';
+      } else {
+        panel.style.display = 'none';
+      }
+    }
+
+    /* ── Ranked examples ─────────────────────────────────────────────── */
+    let _allExamples = [];
+
+    async function loadBookExamples(id) {
+      const panel = document.getElementById('book-examples-panel');
+      const empty = document.getElementById('book-examples-empty');
+      const list  = document.getElementById('book-examples-list');
+      panel.style.display = 'block';
+      _allExamples = [];
+      list.innerHTML = '';
+      empty.style.display = 'block';
+      try {
+        const r = await fetch(`/books/${encodeURIComponent(id)}/examples`);
+        if (!r.ok) return;
+        const d = await r.json();
+        _allExamples = d.examples || [];
+        if (_allExamples.length === 0) return;
+        empty.style.display = 'none';
+        renderBookExamples();
+      } catch (e) {}
+    }
+
+    function renderBookExamples() {
+      const list = document.getElementById('book-examples-list');
+      const top = _allExamples.slice(0, 12);
+      list.innerHTML = top.map((ex, idx) => {
+        const score = Number(ex.example_score || ex.rank_score || 0);
+        const ideas = Array.isArray(ex.associated_ideas) ? ex.associated_ideas.length : 0;
+        const sourceBits = [];
+        if (ex.section) sourceBits.push(esc(ex.section));
+        if (ex.window) sourceBits.push('W' + esc(ex.window));
+        sourceBits.push(ideas + ' idea' + (ideas === 1 ? '' : 's'));
+        return `<button class="example-row" onclick="toggleExampleDetail(${idx})">` +
+          `<span class="example-score">${score.toFixed(2)}</span>` +
+          `<span class="example-text"><span class="example-rank">#${idx + 1}</span>${esc(ex.text || '')}</span>` +
+          `<span class="example-meta">${sourceBits.join(' · ')}</span>` +
+        `</button><div class="example-detail" id="example-detail-${idx}" style="display:none"></div>`;
+      }).join('');
+    }
+
+    function renderExampleDetail(ex) {
+      const source = ex.section
+        ? `<button onclick="event.stopPropagation();tapIdea(${JSON.stringify(ex.section).replace(/"/g, '&quot;')})">${esc(ex.section)}</button>`
+        : '<span>No source section</span>';
+      const win = ex.window ? ` · Window ${esc(ex.window)}` : '';
+      const ideas = Array.isArray(ex.associated_ideas) ? ex.associated_ideas : [];
+      const ideasHtml = ideas.length
+        ? `<div class="example-idea-list">` + ideas.map(idea => {
+            const section = idea.section || '';
+            const sectionLink = section
+              ? `<button class="example-idea-link" onclick="event.stopPropagation();tapIdea(${JSON.stringify(section).replace(/"/g, '&quot;')})">${esc(section)}</button>`
+              : '<span>No section</span>';
+            const match = Number(idea.match_score || 0);
+            return `<div class="example-idea-item">${esc(idea.text || '')}` +
+              `<span class="example-idea-meta">${esc(_IDEA_TYPE_LABELS[idea.type] || idea.type || 'idea')} · ${sectionLink} · match ${match.toFixed(2)}</span>` +
+            `</div>`;
+          }).join('') + `</div>`
+        : '<div class="idea-detail-empty">No associated ideas found for this example.</div>';
+
+      return `<div class="example-detail-text">${esc(ex.text || '')}</div>` +
+        `<div class="example-detail-source">Source: ${source}${win}</div>` +
+        `<div class="idea-detail-heading">Associated ideas</div>` +
+        ideasHtml;
+    }
+
+    function toggleExampleDetail(idx) {
+      const panel = document.getElementById(`example-detail-${idx}`);
+      if (!panel) return;
+      const ex = _allExamples[idx];
+      if (!ex) return;
+      if (panel.style.display === 'none' || !panel.innerHTML) {
+        panel.innerHTML = renderExampleDetail(ex);
+        panel.style.display = 'block';
+      } else {
+        panel.style.display = 'none';
+      }
     }
 
     async function submitUserIdea() {
@@ -1543,6 +2159,56 @@
           renderSynthSources(d.sources_used, wrap);
         } else {
           out.textContent = d.detail || 'Synthesis failed.';
+          out.className = 'synth-output is-error';
+        }
+      } catch (e) {
+        out.textContent = 'Request failed: ' + e.message;
+        out.className = 'synth-output is-error';
+      }
+    }
+
+    /* ── Ask this book ──────────────────────────────────────────────── */
+    async function askBook() {
+      if (!bookId) return;
+      const input = document.getElementById('ask-book-input');
+      const question = input.value.trim();
+      if (!question) return;
+      const wrap = document.getElementById('ask-wrap');
+      const out  = document.getElementById('ask-out');
+      wrap.querySelectorAll('.synth-sources').forEach(el => el.remove());
+      out.textContent = 'Thinking…';
+      out.className = 'synth-output is-loading';
+      wrap.classList.add('visible');
+      wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      try {
+        const r = await fetch(`/books/${encodeURIComponent(bookId)}/ask`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ question }),
+        });
+        const d = await r.json();
+        if (r.ok) {
+          out.textContent = d.answer;
+          out.className = 'synth-output';
+          // Render sources with provenance
+          if (d.sources_used && d.sources_used.length) {
+            const srcDiv = document.createElement('div');
+            srcDiv.className = 'synth-sources';
+            srcDiv.innerHTML = `<div class="synth-sources-heading">Sources used (${d.total_sources_used} of ${d.total_candidates} candidates)</div>` +
+              d.sources_used.map(s => {
+                const isPassage = s.source === 'saved_passage';
+                const typeLbl = isPassage ? 'Saved passage' : (_IDEA_TYPE_LABELS[s.type] || s.type || '?').replace(/s$/, '');
+                const sec = esc(s.section || '(no section)');
+                const badge = s.source === 'user' ? '<span class="idea-user-badge">you</span>'
+                  : isPassage ? '<span class="idea-user-badge" style="background:#7c3aed">saved</span>'
+                  : '';
+                const noteTag = s.has_note ? '<span class="idea-user-badge" style="background:#b45309">noted</span>' : '';
+                return `<button class="synth-src-item" onclick="tapIdea('${esc(s.section||'')}')">${badge}${noteTag}${esc(s.text)}<span class="synth-src-meta">${esc(typeLbl)} · ${sec} · relevance ${(s.query_score||0).toFixed(2)}</span></button>`;
+              }).join('');
+            wrap.appendChild(srcDiv);
+          }
+        } else {
+          out.textContent = d.detail || 'Request failed.';
           out.className = 'synth-output is-error';
         }
       } catch (e) {
@@ -1728,6 +2394,77 @@
       } catch (e) { setOutput('explore-wrap','explore-out','Request failed: ' + e.message,'error'); }
     }
 
+    /* ── Reading style state ─────────────────────────────────────────── */
+    let _readerStyles = { bionic: false, font: 'default', beeline: false, spacing: false };
+    try {
+      const _rs = JSON.parse(localStorage.getItem('reader_styles'));
+      if (_rs) Object.assign(_readerStyles, _rs);
+    } catch (e) {}
+
+    const _fontUrls = {
+      lexend: 'https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;600&display=swap',
+      opendyslexic: 'https://fonts.cdnfonts.com/css/opendyslexic'
+    };
+    const _fontsLoaded = new Set();
+
+    function _loadFont(name) {
+      if (_fontsLoaded.has(name) || !_fontUrls[name]) return;
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = _fontUrls[name];
+      document.head.appendChild(link);
+      _fontsLoaded.add(name);
+    }
+
+    function _saveReaderStyles() {
+      try { localStorage.setItem('reader_styles', JSON.stringify(_readerStyles)); } catch (e) {}
+    }
+
+    function toggleReaderStyle(key) {
+      _readerStyles[key] = !_readerStyles[key];
+      _saveReaderStyles();
+      applyReaderStyles();
+      if (key === 'bionic' && _readerParagraphs.length > 0) {
+        renderParagraphs(_readerParagraphs, _readerLastRead);
+      }
+    }
+
+    function setReaderFont(name) {
+      _readerStyles.font = _readerStyles.font === name ? 'default' : name;
+      _saveReaderStyles();
+      if (name !== 'default') _loadFont(name);
+      applyReaderStyles();
+    }
+
+    function applyReaderStyles() {
+      const out = document.getElementById('reader-out');
+      if (!out) return;
+      out.classList.toggle('reader-font-lexend', _readerStyles.font === 'lexend');
+      out.classList.toggle('reader-font-opendyslexic', _readerStyles.font === 'opendyslexic');
+      out.classList.toggle('reader-beeline', _readerStyles.beeline);
+      out.classList.toggle('reader-spacing-relaxed', _readerStyles.spacing);
+      document.querySelectorAll('.rs-chip').forEach(chip => {
+        const rs = chip.getAttribute('data-rs');
+        let active = false;
+        if (rs === 'bionic') active = _readerStyles.bionic;
+        else if (rs === 'font-lexend') active = _readerStyles.font === 'lexend';
+        else if (rs === 'font-opendyslexic') active = _readerStyles.font === 'opendyslexic';
+        else if (rs === 'beeline') active = _readerStyles.beeline;
+        else if (rs === 'spacing') active = _readerStyles.spacing;
+        chip.classList.toggle('active', active);
+      });
+    }
+
+    function applyBionicText(escaped) {
+      return escaped.replace(/[A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u00FF]{2,}/g, (word) => {
+        const n = word.length <= 3 ? 1 : Math.ceil(word.length * 0.4);
+        return '<b class="bionic-b">' + word.slice(0, n) + '</b>' + word.slice(n);
+      });
+    }
+
+    // Pre-load persisted font
+    if (_readerStyles.font !== 'default') _loadFont(_readerStyles.font);
+
     /* ── Read section ──────────────────────────────────────────────────── */
     let _readerSection = null;
     let _readerLastRead = -1;
@@ -1742,14 +2479,31 @@
       wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
+    function _savedIdxsForSection(section) {
+      const set = new Set();
+      for (const p of (_readState.saved_passages || [])) {
+        if (p.section === section) set.add(p.paragraph_index);
+      }
+      return set;
+    }
+
     function renderParagraphs(paragraphs, lastRead) {
       const out = document.getElementById('reader-out');
       out.className = 'reader-output';
-      out.innerHTML = paragraphs.map((p, i) =>
-        `<p class="reader-para${i <= lastRead ? ' para-read' : ''}" data-pi="${i}">${esc(p)}</p>`
-      ).join('');
+      const savedIdxs = _savedIdxsForSection(_readerSection);
+      const bionic = _readerStyles.bionic;
+      out.innerHTML = paragraphs.map((p, i) => {
+        const saved = savedIdxs.has(i);
+        const text = bionic ? applyBionicText(esc(p)) : esc(p);
+        return `<p class="reader-para${i <= lastRead ? ' para-read' : ''}" data-pi="${i}">` +
+          `<button class="para-save-btn${saved ? ' is-saved' : ''}" onclick="event.stopPropagation();togglePassage(${i})" title="${saved ? 'Remove passage' : 'Save passage'}">${saved ? '&#9733;' : '&#9734;'}</button>` +
+          `${text}</p>`;
+      }).join('');
       _readerLastRead = lastRead;
       updateProgressHint(paragraphs.length);
+      // Show style bar and apply active modes
+      document.getElementById('reader-styles').classList.add('visible');
+      applyReaderStyles();
     }
 
     function updateProgressHint(total) {
@@ -1783,12 +2537,20 @@
         }
         const header = pData.section + (pData.pages ? '  ·  ' + pData.pages : '');
         document.getElementById('reader-out').innerHTML = '';
+        _readerParagraphs = pData.paragraphs;
         renderParagraphs(pData.paragraphs, sData.last_read_paragraph);
-        // Scroll to the next unread paragraph
-        const nextUnread = sData.last_read_paragraph + 1;
-        const target = document.querySelector(`.reader-para[data-pi="${nextUnread}"]`);
-        if (target) setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
-      } catch (e) { setReaderPlain('Request failed: ' + e.message, 'error'); }
+        // Scroll to pending passage or next unread
+        const scrollTo = _pendingScrollPara !== null ? _pendingScrollPara : sData.last_read_paragraph + 1;
+        const target = document.querySelector(`.reader-para[data-pi="${scrollTo}"]`);
+        if (target) setTimeout(() => {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          if (_pendingScrollPara !== null) {
+            target.classList.add('para-highlight');
+            setTimeout(() => target.classList.remove('para-highlight'), 2000);
+          }
+        }, 100);
+        _pendingScrollPara = null;
+      } catch (e) { _pendingScrollPara = null; setReaderPlain('Request failed: ' + e.message, 'error'); }
     }
 
     /* Triple-tap to mark paragraph progress */
@@ -1834,6 +2596,103 @@
         }
       } catch (e) {}
     }
+
+    /* ── Passage bookmarks ──────────────────────────────────────────── */
+    let _readerParagraphs = []; // stash for preview text
+
+    async function togglePassage(idx) {
+      if (!bookId || !_readerSection) return;
+      const preview = (_readerParagraphs[idx] || '').slice(0, 200);
+      try {
+        const params = new URLSearchParams({ section: _readerSection, paragraph: idx });
+        if (preview) params.set('preview', preview);
+        const r = await fetch(
+          `/books/${encodeURIComponent(bookId)}/reading-state/save-passage?` + params,
+          { method: 'POST' }
+        );
+        if (r.ok) {
+          const d = await r.json();
+          _readState.saved_passages = d.saved_passages;
+          // Update just the button for this paragraph
+          const btn = document.querySelector(`.reader-para[data-pi="${idx}"] .para-save-btn`);
+          if (btn) {
+            const saved = d.action === 'added';
+            btn.classList.toggle('is-saved', saved);
+            btn.innerHTML = saved ? '&#9733;' : '&#9734;';
+            btn.title = saved ? 'Remove passage' : 'Save passage';
+          }
+          loadSavedPassages();
+        }
+      } catch (e) {}
+    }
+
+    async function loadSavedPassages() {
+      try {
+        const r = await fetch('/saved-passages');
+        if (!r.ok) return;
+        const d = await r.json();
+        renderSavedPassages(d.saved_passages || []);
+      } catch (e) {}
+    }
+
+    function renderSavedPassages(items) {
+      const card  = document.getElementById('passages-card');
+      const empty = document.getElementById('passages-empty');
+      const list  = document.getElementById('passages-list');
+      if (items.length === 0) {
+        card.style.display = 'none';
+        list.innerHTML = '';
+        return;
+      }
+      card.style.display = 'block';
+      empty.style.display = 'none';
+      // Group by book
+      const byBook = {};
+      for (const item of items) {
+        const bid = item.book_id || '?';
+        if (!byBook[bid]) byBook[bid] = { title: item.title || bid, items: [] };
+        byBook[bid].items.push(item);
+      }
+      let html = '';
+      for (const [bid, group] of Object.entries(byBook)) {
+        html += `<div class="xb-book-heading" onclick="this.nextElementSibling.classList.toggle('xb-ideas-collapsed')">` +
+          `${esc(group.title)} (${group.items.length})<span class="xb-toggle">tap to toggle</span></div>`;
+        html += `<div class="xb-ideas-collapsed">`;
+        html += group.items.map(item => {
+          const secShort = (item.section || '').length > 40
+            ? item.section.slice(0, 37) + '…' : (item.section || '');
+          const previewStr = item.preview ? item.preview.slice(0, 120) : '';
+          const bid = esc(item.book_id || '');
+          const sec = esc(item.section || '');
+          return `<button class="passage-item" onclick="openPassage('${bid}','${sec}',${item.paragraph_index})">` +
+            `<div class="passage-hd"><span class="passage-sec">${esc(secShort)} ¶${item.paragraph_index}</span></div>` +
+            `${previewStr ? `<div class="passage-preview">${esc(previewStr)}</div>` : ''}</button>`;
+        }).join('');
+        html += `</div>`;
+      }
+      list.innerHTML = html;
+    }
+
+    function openPassage(bid, section, paraIdx) {
+      // Switch book if needed
+      if (bid !== bookId) {
+        let found = null;
+        document.querySelectorAll('.book-btn').forEach(b => {
+          if (b.getAttribute('data-book-id') === bid) found = b;
+        });
+        selectBook(bid, found);
+      }
+      // Set section and open reader
+      document.getElementById('explore-section').value = section;
+      document.getElementById('inspect-section').value = section;
+      document.getElementById('reader-card').style.display = 'block';
+      loadInspectNav(section, null);
+      // Load section in reader, then scroll to paragraph
+      _pendingScrollPara = paraIdx;
+      runReadSection();
+    }
+
+    let _pendingScrollPara = null;
 
     /* ── Inspect window (Feature 4: prev/next nav) ───────────────────── */
     async function runInspect() {
@@ -1946,6 +2805,7 @@
     loadBooks();
     loadIdeas();
     loadAllIdeas();
+    loadSavedPassages();
   </script>
 </body>
 </html>
